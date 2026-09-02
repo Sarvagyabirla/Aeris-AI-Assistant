@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aeris-assistant"
+version = "1.0.0"
+description = "A permission-first Windows personal AI assistant"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = {text = "MIT"}
+authors = [{name = "Sarvagya Birla"}]
+dependencies = [
+  "python-dotenv>=1.0.1",
+  "send2trash>=1.8.3",
+]
+
+[project.optional-dependencies]
+windows = [
+  "comtypes>=1.4.8",
+  "Pillow>=10.4.0",
+  "psutil>=6.0.0",
+  "pyautogui>=0.9.54",
+  "pyperclip>=1.9.0",
+  "pycaw==20240210",
+  "screen-brightness-control>=0.24.0",
+]
+voice = [
+  "faster-whisper>=1.1.0",
+  "numpy>=1.26.4",
+  "pyttsx3>=2.98",
+  "sounddevice>=0.5.1",
+]
+ai = ["google-genai>=1.0.0"]
+gmail = [
+  "google-api-python-client>=2.160.0",
+  "google-auth-httplib2>=0.2.0",
+  "google-auth-oauthlib>=1.2.1",
+  "keyring>=25.6.0",
+]
+dev = ["pytest>=8.3.4", "pytest-cov>=6.0.0", "ruff>=0.9.0"]
+
+[project.scripts]
+aeris = "aeris.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["aeris*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]

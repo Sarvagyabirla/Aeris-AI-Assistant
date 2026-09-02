@@ -1,0 +1,47 @@
+{
+  "chrome": [
+    "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe",
+    "%ProgramFiles(x86)%\\Google\\Chrome\\Application\\chrome.exe",
+    "%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe",
+    "chrome.exe"
+  ],
+  "vscode": [
+    "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe",
+    "%ProgramFiles%\\Microsoft VS Code\\Code.exe",
+    "code.exe"
+  ],
+  "fl studio": [
+    "%ProgramFiles%\\Image-Line\\FL Studio 2025\\FL64.exe",
+    "%ProgramFiles%\\Image-Line\\FL Studio 2024\\FL64.exe",
+    "%ProgramFiles%\\Image-Line\\FL Studio 21\\FL64.exe"
+  ],
+  "davinci resolve": [
+    "%ProgramFiles%\\Blackmagic Design\\DaVinci Resolve\\Resolve.exe"
+  ],
+  "blender": [
+    "%ProgramFiles%\\Blender Foundation\\Blender 4.5\\blender.exe",
+    "%ProgramFiles%\\Blender Foundation\\Blender 4.4\\blender.exe",
+    "blender.exe"
+  ],
+  "task manager": [
+    "taskmgr.exe"
+  ],
+  "terminal": [
+    "wt.exe"
+  ],
+  "control panel": [
+    "control.exe"
+  ],
+  "vlc": [
+    "%ProgramFiles%\\VideoLAN\\VLC\\vlc.exe",
+    "vlc.exe"
+  ],
+  "obs studio": [
+    "%ProgramFiles%\\obs-studio\\bin\\64bit\\obs64.exe",
+    "obs64.exe"
+  ],
+  "notepad++": [
+    "%ProgramFiles%\\Notepad++\\notepad++.exe",
+    "notepad++.exe"
+  ]
+}

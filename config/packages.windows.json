@@ -1,0 +1,18 @@
+{
+  "7zip": "7zip.7zip",
+  "blender": "BlenderFoundation.Blender",
+  "chrome": "Google.Chrome",
+  "discord": "Discord.Discord",
+  "firefox": "Mozilla.Firefox",
+  "git": "Git.Git",
+  "google chrome": "Google.Chrome",
+  "node.js": "OpenJS.NodeJS.LTS",
+  "notepad++": "Notepad++.Notepad++",
+  "obs studio": "OBSProject.OBSStudio",
+  "powertoys": "Microsoft.PowerToys",
+  "python 3.11": "Python.Python.3.11",
+  "spotify": "Spotify.Spotify",
+  "visual studio code": "Microsoft.VisualStudioCode",
+  "vlc": "VideoLAN.VLC",
+  "vscode": "Microsoft.VisualStudioCode"
+}

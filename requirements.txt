@@ -1,0 +1,5 @@
+python-dotenv>=1.0.1
+send2trash>=1.8.3
+
+# The Windows setup script installs the optional Windows, voice, Gemini,
+# Gmail, and development dependencies declared in pyproject.toml.
