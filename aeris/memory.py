@@ -26,18 +26,22 @@ class MemoryStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_at TEXT NOT NULL,
                     role TEXT NOT NULL,
-                    content TEXT NOT NULL
+                    content TEXT NOT NULL,
+                    classification TEXT NOT NULL DEFAULT 'LOCAL_ONLY'
                 )
                 """
             )
 
-    def add(self, role: str, content: str) -> None:
+    def add(self, role: str, content: str, classification: str = "LOCAL_ONLY") -> None:
         if not content.strip():
             return
+        if classification == "SENSITIVE":
+            return
+            
         with self._lock, self._connect() as connection:
             connection.execute(
-                "INSERT INTO messages(created_at, role, content) VALUES (?, ?, ?)",
-                (datetime.now(timezone.utc).isoformat(), role, content[:10_000]),
+                "INSERT INTO messages(created_at, role, content, classification) VALUES (?, ?, ?, ?)",
+                (datetime.now(timezone.utc).isoformat(), role, content[:10_000], classification),
             )
 
     def recent(self, limit: int = 12) -> list[dict[str, str]]:

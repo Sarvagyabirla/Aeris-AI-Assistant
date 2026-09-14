@@ -54,9 +54,7 @@ def test_sensitive_command_text_is_not_stored(tmp_path):
         lambda *_: False,
     )
     messages = assistant.memory.recent()
-    assert messages[0]["content"] == "[sensitive command omitted]"
-    assert "Hidden body" not in messages[0]["content"]
-    assert messages[1]["content"] == "[sensitive result omitted]"
+    assert len(messages) == 0
 
 
 def test_network_failure_becomes_offline_message(tmp_path):

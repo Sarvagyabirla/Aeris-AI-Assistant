@@ -45,6 +45,18 @@ from aeris.router import LocalRouter, has_wake_word, strip_wake_word
             "prompt",
             "Use Python. an expense tracker",
         ),
+        ("awaz 30 kar do", "desktop.set_volume", "level", 30),
+        ("volume kam karo", "desktop.change_volume", "delta", -10),
+        ("volume badhao", "desktop.change_volume", "delta", 10),
+        ("brightness 50 kar do", "desktop.set_brightness", "level", 50),
+        ("screen ki brightness kam karo", "desktop.change_brightness", "delta", -10),
+        ("YouTube kholo", "browser.open_url", "url", "https://www.youtube.com"),
+        ("Chrome open karo", "desktop.open_app", "name", "chrome"),
+        ("mera computer health check karo", "system.health", None, None),
+        ("screenshot le lo", "desktop.screenshot", None, None),
+        ("downloads folder kholo", "downloads.open_folder", None, None),
+        ("computer lock karo", "system.lock", None, None),
+        ("Aeris, pause the song", "desktop.media_control", "action", "play_pause"),
     ],
 )
 def test_common_routes(command, tool, key, value):

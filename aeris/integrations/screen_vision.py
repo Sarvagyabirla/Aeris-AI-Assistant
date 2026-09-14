@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from io import BytesIO
+import threading
+import time
 
 from ..models import ActionResult
+from ..state import app_store
 
 
 class ScreenVision:
@@ -70,3 +73,57 @@ class ScreenVision:
             "Screen analysis completed.",
             data={"analysis": answer, "capture_retained": False},
         )
+
+    def monitor_screen(self, arguments: dict[str, object]) -> ActionResult:
+        if not self.api_key:
+            return ActionResult(False, "Screen monitoring requires GEMINI_API_KEY.", error="ai_not_configured")
+            
+        duration = int(arguments.get("duration_minutes", 1))
+        event_query = str(arguments.get("event_query", "Alert me if there are errors on the screen."))
+        
+        def monitor_loop():
+            end_time = time.time() + duration * 60
+            while time.time() < end_time:
+                if app_store.get("kill_switch_active"):
+                    app_store.set("status_message", "Screen monitoring aborted by kill switch.")
+                    break
+                    
+                # We can reuse inspect logic directly
+                try:
+                    from PIL import ImageGrab
+                    from google import genai
+                    from google.genai import types
+                    
+                    image = ImageGrab.grab(all_screens=True)
+                    image.thumbnail((1920, 1080))
+                    buffer = BytesIO()
+                    image.convert("RGB").save(buffer, format="JPEG", quality=82, optimize=True)
+                    
+                    instruction = (
+                        "You are a background monitor. Examine this screenshot for the following event: "
+                        f"'{event_query}'. If the event has occurred, reply with a short alert message starting with ALERT. "
+                        "If nothing relevant has occurred, reply EXACTLY with 'NOTHING'."
+                    )
+                    
+                    client = genai.Client(api_key=self.api_key)
+                    response = client.models.generate_content(
+                        model=self.model,
+                        contents=[instruction, types.Part.from_bytes(data=buffer.getvalue(), mime_type="image/jpeg")],
+                    )
+                    
+                    answer = (response.text or "").strip()
+                    if answer.startswith("ALERT"):
+                        app_store.set("status_message", f"Monitor Alert: {answer}")
+                        # Could trigger TTS here in a broader system
+                        break
+                except Exception:
+                    pass
+                    
+                time.sleep(10) # 10 seconds interval
+                
+            app_store.set("status_message", "Screen monitoring finished.")
+
+        thread = threading.Thread(target=monitor_loop, daemon=True)
+        thread.start()
+        
+        return ActionResult(True, f"Started background screen monitoring for {duration} minutes looking for: {event_query}.")

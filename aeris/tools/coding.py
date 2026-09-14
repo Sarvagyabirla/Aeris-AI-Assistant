@@ -261,3 +261,55 @@ Rules:
                 "opened_with": opened,
             },
         )
+
+    def search_workspace(self, arguments: dict[str, object]) -> ActionResult:
+        query = str(arguments["query"]).strip()
+        if not query:
+            return ActionResult(False, "Query cannot be empty.", error="empty_query")
+        
+        matches = []
+        workspace = self.guard.resolve(self.workspace)
+        if not workspace.exists():
+            return ActionResult(False, "Workspace does not exist.", error="workspace_not_found")
+            
+        for path in workspace.rglob("*"):
+            if path.is_file() and path.suffix.lower() in _ALLOWED_SUFFIXES:
+                try:
+                    content = path.read_text(encoding="utf-8", errors="ignore")
+                    if query in content:
+                        # Extract snippet
+                        idx = content.find(query)
+                        start = max(0, idx - 40)
+                        end = min(len(content), idx + len(query) + 40)
+                        snippet = content[start:end].replace('\n', ' ')
+                        matches.append(f"{path.relative_to(workspace)}: ...{snippet}...")
+                        if len(matches) >= 30:
+                            break
+                except OSError:
+                    continue
+                    
+        return ActionResult(True, f"Found {len(matches)} matches.", data={"matches": matches})
+
+    def apply_diff(self, arguments: dict[str, object]) -> ActionResult:
+        # A simple replacement logic based on old/new content
+        path_str = str(arguments["path"])
+        old_content = str(arguments["old_content"])
+        new_content = str(arguments["new_content"])
+        
+        target = self.guard.resolve(self.workspace / path_str)
+        if not target.exists() or not target.is_file():
+            return ActionResult(False, f"File not found: {target}", error="file_not_found")
+            
+        if target.suffix.lower() not in _ALLOWED_SUFFIXES:
+            return ActionResult(False, "File type not allowed.", error="unsupported_file_type")
+            
+        try:
+            current = target.read_text(encoding="utf-8")
+            if old_content not in current:
+                return ActionResult(False, "Old content block not found exactly in the file.", error="patch_failed")
+                
+            updated = current.replace(old_content, new_content, 1)
+            target.write_text(updated, encoding="utf-8")
+            return ActionResult(True, f"Applied diff to {target.name}", data={"path": str(target)})
+        except Exception as e:
+            return ActionResult(False, f"Failed to apply diff: {e}", error="patch_error")

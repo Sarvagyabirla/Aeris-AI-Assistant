@@ -83,6 +83,23 @@ class AppCatalog:
                 return located
             if Path(expanded).exists():
                 return str(Path(expanded))
+        
+        # Fallback to Windows Registry App Paths
+        if os.name == "nt":
+            import winreg
+            for hkey in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                try:
+                    key = winreg.OpenKey(hkey, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths")
+                    # Try name.exe
+                    try:
+                        subkey = winreg.OpenKey(key, f"{name}.exe")
+                        path, _ = winreg.QueryValueEx(subkey, "")
+                        if path and Path(path).exists():
+                            return path
+                    except FileNotFoundError:
+                        pass
+                except OSError:
+                    continue
         return None
 
     @staticmethod
@@ -205,9 +222,11 @@ class DesktopTools:
         try:
             from ctypes import POINTER, cast
 
+            import pythoncom
             from comtypes import CLSCTX_ALL
             from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
+            pythoncom.CoInitialize()
             device = AudioUtilities.GetSpeakers()
             interface = device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
             endpoint = cast(interface, POINTER(IAudioEndpointVolume))
@@ -225,9 +244,11 @@ class DesktopTools:
         try:
             from ctypes import POINTER, cast
 
+            import pythoncom
             from comtypes import CLSCTX_ALL
             from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
+            pythoncom.CoInitialize()
             device = AudioUtilities.GetSpeakers()
             interface = device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
             endpoint = cast(interface, POINTER(IAudioEndpointVolume))

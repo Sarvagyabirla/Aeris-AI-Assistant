@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable
+import pydantic
 
 from .audit import AuditLogger
 from .models import ActionRequest, ActionResult, PermissionLevel
@@ -17,14 +18,22 @@ class ToolSpec:
     permission: PermissionLevel
     handler: ToolHandler
     required_args: tuple[str, ...] = ()
+    arguments_schema: dict[str, Any] | None = None
+    model: type[pydantic.BaseModel] | None = None
 
     def public_definition(self) -> dict[str, Any]:
-        return {
+        spec = {
             "name": self.name,
             "description": self.description,
             "permission": self.permission.value,
-            "required_arguments": list(self.required_args),
         }
+        if self.model:
+            spec["arguments_schema"] = self.model.model_json_schema()
+        elif self.arguments_schema:
+            spec["arguments_schema"] = self.arguments_schema
+        elif self.required_args:
+            spec["required_arguments"] = list(self.required_args)
+        return spec
 
 
 class ToolRegistry:
@@ -84,6 +93,17 @@ class ToolRegistry:
             self.audit.write("tool_rejected", request=self._audit_request(request), reason=result.error)
             return result
 
+        arguments = request.arguments
+        if spec.model:
+            try:
+                # Runtime validation of arguments using Pydantic
+                validated = spec.model.model_validate(request.arguments)
+                arguments = validated.model_dump()
+            except pydantic.ValidationError as e:
+                result = ActionResult(False, f"Invalid arguments for {request.tool}: {e}", error="invalid_arguments")
+                self.audit.write("tool_rejected", request=self._audit_request(request), reason=result.error)
+                return result
+
         decision = self.permissions.authorize(request, spec.permission, approval_callback)
         if not decision.allowed:
             result = ActionResult(False, decision.reason, error="permission_denied")
@@ -100,7 +120,7 @@ class ToolRegistry:
 
         self.audit.write("tool_started", request=self._audit_request(request))
         try:
-            result = spec.handler(dict(request.arguments))
+            result = spec.handler(dict(arguments))
         except Exception as exc:  # defensive boundary around OS integrations
             result = ActionResult(False, f"{request.tool} failed safely.", error=str(exc))
         self.audit.write(

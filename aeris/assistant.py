@@ -8,14 +8,18 @@ from .audit import AuditLogger
 from .config import AerisConfig
 from .integrations.gemini import GeminiPlanner
 from .integrations.gmail import GmailClient
+from .integrations.google_calendar import GoogleCalendarClient
+from .integrations.ollama import OllamaPlanner
 from .integrations.screen_vision import ScreenVision
 from .memory import MemoryStore
 from .models import ActionRequest, ActionResult, AssistantTurn, PermissionLevel, PlannedResponse
 from .permissions import ApprovalCallback, PermissionEngine
 from .registry import ToolRegistry, ToolSpec
 from .router import LocalRouter
+from . import schemas
 from .tools import (
     BrowserTools,
+    BrowserAdvancedTools,
     CodingTools,
     DesktopTools,
     DownloadTools,
@@ -38,11 +42,13 @@ class AerisAssistant:
             if self.config.ai_enabled and self.config.gemini_api_key
             else None
         )
+        self._ollama = OllamaPlanner() if self.config.ai_enabled else None
         self._register_tools()
 
     def _register_tools(self) -> None:
         desktop = DesktopTools(self.config.app_catalog_file, self.config.data_dir / "screenshots")
         browser = BrowserTools(self.config.allowed_domains)
+        browser_adv = BrowserAdvancedTools()
         files = FilesystemTools(self.config.allowed_paths)
         downloads = DownloadTools(
             self.config.download_dir,
@@ -64,6 +70,7 @@ class AerisAssistant:
             self.config.gemini_model,
         )
         gmail = GmailClient(self.config.gmail_credentials_file)
+        calendar = GoogleCalendarClient(self.config.gmail_credentials_file)
 
         def status(_: dict[str, Any]) -> ActionResult:
             data = self.config.public_summary() | {
@@ -113,56 +120,70 @@ class AerisAssistant:
                 "Open a configured Windows application.",
                 PermissionLevel.AUTO,
                 desktop.open_app,
-                ("name",),
+                model=schemas.OpenApp,
+            ),
+            ToolSpec(
+                "email.send_email",
+                "Draft and send a new email using Gmail.",
+                PermissionLevel.CONFIRM,
+                gmail.send_email,
+                model=schemas.SendEmail,
+            ),
+            ToolSpec(
+                "calendar.list_events",
+                "List upcoming events from Google Calendar.",
+                PermissionLevel.SESSION,
+                calendar.list_events,
+                model=schemas.ListCalendarEvents,
             ),
             ToolSpec(
                 "desktop.close_app",
                 "Close a configured application; unsaved work may be lost.",
                 PermissionLevel.CONFIRM,
                 desktop.close_app,
-                ("name",),
+                model=schemas.CloseApp,
             ),
             ToolSpec(
                 "desktop.set_volume",
                 "Set master volume from 0 to 100.",
                 PermissionLevel.AUTO,
                 desktop.set_volume,
-                ("level",),
+                model=schemas.SetVolume,
             ),
             ToolSpec(
                 "desktop.change_volume",
                 "Increase or decrease master volume.",
                 PermissionLevel.AUTO,
                 desktop.change_volume,
-                ("delta",),
+                model=schemas.ChangeVolume,
             ),
             ToolSpec(
                 "desktop.set_brightness",
                 "Set display brightness from 0 to 100.",
                 PermissionLevel.AUTO,
                 desktop.set_brightness,
-                ("level",),
+                model=schemas.SetBrightness,
             ),
             ToolSpec(
                 "desktop.change_brightness",
                 "Increase or decrease display brightness.",
                 PermissionLevel.AUTO,
                 desktop.change_brightness,
-                ("delta",),
+                model=schemas.ChangeBrightness,
             ),
             ToolSpec(
                 "desktop.media_control",
                 "Control media playback or mute.",
                 PermissionLevel.AUTO,
                 desktop.media_control,
-                ("action",),
+                model=schemas.MediaControl,
             ),
             ToolSpec(
                 "desktop.type_text",
                 "Type text into the currently active application.",
                 PermissionLevel.CONFIRM,
                 desktop.type_text,
-                ("text",),
+                model=schemas.TypeText,
             ),
             ToolSpec(
                 "desktop.screenshot",
@@ -175,7 +196,7 @@ class AerisAssistant:
                 "Copy text to the Windows clipboard.",
                 PermissionLevel.AUTO,
                 desktop.copy_clipboard,
-                ("text",),
+                model=schemas.ClipboardCopy,
             ),
             ToolSpec(
                 "desktop.clipboard_read",
@@ -188,7 +209,7 @@ class AerisAssistant:
                 "Switch, maximize, minimize, or show desktop using an approved shortcut.",
                 PermissionLevel.AUTO,
                 desktop.window_action,
-                ("action",),
+                model=schemas.WindowAction,
             ),
             ToolSpec(
                 "desktop.close_current_window",
@@ -201,42 +222,90 @@ class AerisAssistant:
                 "Capture the visible screens once, analyze them with Gemini, and retain no screenshot.",
                 PermissionLevel.SESSION,
                 vision.inspect,
-                ("question",),
+                model=schemas.InspectScreen,
+            ),
+            ToolSpec(
+                "vision.monitor_screen",
+                "Start a background loop to continuously monitor the screen for a specific event.",
+                PermissionLevel.CONFIRM,
+                vision.monitor_screen,
+                model=schemas.MonitorScreen,
             ),
             ToolSpec(
                 "coding.create_project",
                 "Generate a new validated coding project inside the dedicated workspace without running it.",
                 PermissionLevel.CONFIRM,
                 coding.create_project,
-                ("prompt",),
+                model=schemas.CreateProject,
+            ),
+            ToolSpec(
+                "coding.search_workspace",
+                "Search the coding workspace for text across files.",
+                PermissionLevel.AUTO,
+                coding.search_workspace,
+                model=schemas.SearchWorkspace,
+            ),
+            ToolSpec(
+                "coding.apply_diff",
+                "Modify an existing file in the coding workspace.",
+                PermissionLevel.CONFIRM,
+                coding.apply_diff,
+                model=schemas.ApplyDiff,
             ),
             ToolSpec(
                 "browser.open_url",
                 "Open an approved HTTP or HTTPS URL.",
                 PermissionLevel.AUTO,
                 browser.open_url,
-                ("url",),
+                model=schemas.OpenUrl,
             ),
             ToolSpec(
                 "browser.search_web",
                 "Search the web in the default browser.",
                 PermissionLevel.AUTO,
                 browser.search_web,
-                ("query",),
+                model=schemas.SearchWeb,
             ),
             ToolSpec(
                 "browser.search_youtube",
                 "Search YouTube in the default browser.",
                 PermissionLevel.AUTO,
                 browser.search_youtube,
-                ("query",),
+                model=schemas.SearchWeb,
+            ),
+            ToolSpec(
+                "browser.advanced_navigate",
+                "Navigate to a URL using the interactive playwright browser.",
+                PermissionLevel.AUTO,
+                browser_adv.navigate,
+                model=schemas.OpenUrl,
+            ),
+            ToolSpec(
+                "browser.advanced_extract",
+                "Extract text from the interactive playwright browser.",
+                PermissionLevel.SESSION,
+                browser_adv.extract,
+            ),
+            ToolSpec(
+                "browser.advanced_click",
+                "Click an element in the interactive playwright browser by CSS or text selector.",
+                PermissionLevel.AUTO,
+                browser_adv.click,
+                model=schemas.BrowserClick,
+            ),
+            ToolSpec(
+                "browser.advanced_fill",
+                "Fill a text field in the interactive playwright browser.",
+                PermissionLevel.AUTO,
+                browser_adv.fill,
+                model=schemas.BrowserFill,
             ),
             ToolSpec(
                 "downloads.download",
                 "Download one public HTTP/HTTPS file into the configured Downloads folder without executing it.",
                 PermissionLevel.CONFIRM,
                 downloads.download,
-                ("url",),
+                model=schemas.Download,
             ),
             ToolSpec(
                 "downloads.open_folder",
@@ -255,28 +324,28 @@ class AerisAssistant:
                 "Search the trusted Windows Package Manager catalog.",
                 PermissionLevel.AUTO,
                 packages.search,
-                ("query",),
+                model=schemas.PackageSearch,
             ),
             ToolSpec(
                 "packages.install",
                 "Install an exact app from the official winget source.",
                 PermissionLevel.CONFIRM,
                 packages.install,
-                ("package",),
+                model=schemas.PackageAction,
             ),
             ToolSpec(
                 "packages.update",
                 "Update one exact app through winget.",
                 PermissionLevel.CONFIRM,
                 packages.update,
-                ("package",),
+                model=schemas.PackageAction,
             ),
             ToolSpec(
                 "packages.uninstall",
                 "Uninstall one exact app through winget.",
                 PermissionLevel.CONFIRM,
                 packages.uninstall,
-                ("package",),
+                model=schemas.PackageAction,
             ),
             ToolSpec(
                 "packages.list_installed",
@@ -295,75 +364,76 @@ class AerisAssistant:
                 "Launch a downloaded Windows installer only after Defender and signature checks.",
                 PermissionLevel.CONFIRM,
                 packages.install_file,
-                ("path",),
+                model=schemas.InstallFile,
             ),
             ToolSpec(
-                "files.list", "List items inside an allowed folder.", PermissionLevel.AUTO, files.list_files
+                "files.list", "List items inside an allowed folder.", PermissionLevel.AUTO, files.list_files, model=schemas.OptionalFilePath
             ),
             ToolSpec(
                 "files.find",
                 "Find files only inside allowed folders.",
                 PermissionLevel.AUTO,
                 files.find_files,
-                ("query",),
+                model=schemas.FindFiles,
             ),
             ToolSpec(
                 "files.read",
                 "Read a small approved text file.",
                 PermissionLevel.SESSION,
                 files.read_text,
-                ("path",),
+                model=schemas.FilePath,
             ),
             ToolSpec(
                 "files.open",
                 "Open a non-executable file inside allowed folders.",
                 PermissionLevel.SESSION,
                 files.open_file,
-                ("path",),
+                model=schemas.FilePath,
             ),
             ToolSpec(
                 "files.delete",
                 "Move a file to the Recycle Bin.",
                 PermissionLevel.CONFIRM,
                 files.delete_file,
-                ("path",),
+                model=schemas.FilePath,
             ),
             ToolSpec(
                 "files.open_folder",
                 "Open an allowed folder in File Explorer.",
                 PermissionLevel.AUTO,
                 files.open_folder,
+                model=schemas.OptionalFilePath,
             ),
             ToolSpec(
                 "files.create_folder",
                 "Create a folder inside allowed paths.",
                 PermissionLevel.CONFIRM,
                 files.create_folder,
-                ("path",),
+                model=schemas.FilePath,
             ),
             ToolSpec(
                 "files.write_text",
                 "Create a new text file without overwriting existing content.",
                 PermissionLevel.CONFIRM,
                 files.write_text,
-                ("path", "text"),
+                model=schemas.WriteText,
             ),
             ToolSpec(
                 "files.copy",
                 "Copy a file within allowed paths without overwriting.",
                 PermissionLevel.CONFIRM,
                 files.copy_file,
-                ("source", "destination"),
+                model=schemas.CopyMove,
             ),
             ToolSpec(
                 "files.move",
                 "Move or rename a file within allowed paths without overwriting.",
                 PermissionLevel.CONFIRM,
                 files.move_file,
-                ("source", "destination"),
+                model=schemas.CopyMove,
             ),
             ToolSpec(
-                "email.list_recent", "List recent Gmail messages.", PermissionLevel.SESSION, gmail.list_recent
+                "email.list_recent", "List recent Gmail messages.", PermissionLevel.SESSION, gmail.list_recent, model=schemas.ListRecentEmails
             ),
             ToolSpec(
                 "email.read_latest",
@@ -376,7 +446,7 @@ class AerisAssistant:
                 "Send a Gmail message after exact preview confirmation.",
                 PermissionLevel.CONFIRM,
                 gmail.send_email,
-                ("to", "subject", "body"),
+                model=schemas.SendEmail,
             ),
         ]
         for spec in specs:
@@ -389,8 +459,22 @@ class AerisAssistant:
             try:
                 plan = self._gemini.plan(user_text, self.registry.definitions(), self.memory.recent(8))
             except Exception as exc:
-                self.audit.write("planner_failed", error=str(exc))
-                plan = PlannedResponse(reply=self._planner_failure_message(exc))
+                self.audit.write("gemini_planner_failed", error=str(exc))
+                if self._is_network_error(exc) and self._ollama is not None:
+                    # Fallback to offline planner
+                    try:
+                        plan = self._ollama.plan(user_text, self.registry.definitions(), self.memory.recent(8))
+                    except Exception as ollama_exc:
+                        self.audit.write("ollama_planner_failed", error=str(ollama_exc))
+                        plan = PlannedResponse(reply=self._planner_failure_message(exc))
+                else:
+                    plan = PlannedResponse(reply=self._planner_failure_message(exc))
+        elif plan is None and self._ollama is not None:
+            try:
+                plan = self._ollama.plan(user_text, self.registry.definitions(), self.memory.recent(8))
+            except Exception as exc:
+                self.audit.write("ollama_planner_failed", error=str(exc))
+                plan = PlannedResponse(reply="Ollama offline planner failed. Say 'help' for local commands.")
         elif plan is None:
             plan = PlannedResponse(
                 reply="I do not know that command yet. Say 'help', or configure GEMINI_API_KEY for flexible requests."
@@ -405,7 +489,7 @@ class AerisAssistant:
             or action.tool in {"files.read", "files.write_text", "desktop.type_text"}
             for action in plan.actions
         )
-        self.memory.add("user", "[sensitive command omitted]" if sensitive else user_text)
+        self.memory.add("user", user_text, classification="SENSITIVE" if sensitive else "LOCAL_ONLY")
 
         results: list[ActionResult] = []
         lines = [plan.reply] if plan.reply else []
@@ -419,11 +503,11 @@ class AerisAssistant:
                 lines.append(details)
 
         reply = "\n".join(line for line in lines if line).strip() or "Done."
-        self.memory.add("assistant", "[sensitive result omitted]" if sensitive else reply[:10_000])
+        self.memory.add("assistant", reply[:10_000], classification="SENSITIVE" if sensitive else "LOCAL_ONLY")
         return AssistantTurn(input_text=user_text, reply=reply, results=results)
 
     @staticmethod
-    def _planner_failure_message(exc: Exception) -> str:
+    def _is_network_error(exc: Exception) -> bool:
         message = str(exc).lower()
         network_markers = (
             "getaddrinfo",
@@ -434,9 +518,13 @@ class AerisAssistant:
             "timed out",
             "unavailable",
         )
-        if isinstance(exc, (ConnectionError, TimeoutError, socket.gaierror)) or any(
+        return isinstance(exc, (ConnectionError, TimeoutError, socket.gaierror)) or any(
             marker in message for marker in network_markers
-        ):
+        )
+
+    @staticmethod
+    def _planner_failure_message(exc: Exception) -> str:
+        if AerisAssistant._is_network_error(exc):
             return (
                 "Internet is unavailable, so Gemini was skipped. Offline computer commands still work. "
                 "Say 'offline help' to hear examples."

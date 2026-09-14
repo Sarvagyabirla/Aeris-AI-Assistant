@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .models import ActionRequest, PermissionLevel
+from .state import app_store
 
 ApprovalCallback = Callable[[ActionRequest, PermissionLevel, str], bool]
 
@@ -67,10 +68,12 @@ class PermissionEngine:
     def stop(self) -> None:
         with self._lock:
             self._kill_switch = True
+            app_store.set("kill_switch_active", True)
 
     def resume(self) -> None:
         with self._lock:
             self._kill_switch = False
+            app_store.set("kill_switch_active", False)
 
     def clear_session(self) -> None:
         self._session_approvals.clear()
@@ -81,6 +84,9 @@ class PermissionEngine:
         level: PermissionLevel,
         callback: ApprovalCallback | None,
     ) -> AuthorizationDecision:
+        if self.stopped and request.tool not in {"system.status", "system.resume"}:
+            return AuthorizationDecision(False, "Kill switch is active. Action blocked.")
+
         if level is PermissionLevel.BLOCKED:
             return AuthorizationDecision(False, "This capability is blocked by the security policy.")
 

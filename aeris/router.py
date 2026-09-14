@@ -54,6 +54,10 @@ _TENS = {
     "eighty": 80,
     "ninety": 90,
 }
+_HINDI_NUMBERS = {
+    "das": 10, "bees": 20, "tees": 30, "chalis": 40, "pachas": 50,
+    "saath": 60, "sattar": 70, "assi": 80, "nabbe": 90, "sau": 100
+}
 
 
 def has_wake_word(value: str, preferred: str = "aeris") -> bool:
@@ -108,6 +112,8 @@ def _extract_level(value: str) -> int | None:
 
     tokens = re.findall(r"[a-z]+", value.lower().replace("-", " "))
     for index, token in enumerate(tokens):
+        if token in _HINDI_NUMBERS:
+            return _HINDI_NUMBERS[token]
         if token not in _ONES and token not in _TENS and token != "hundred":
             continue
         total = 0
@@ -162,11 +168,11 @@ class LocalRouter:
             return self._action(original, "system.stop")
         if normalized in {"resume", "resume aeris", "start aeris"}:
             return self._action(original, "system.resume")
-        if normalized in {"computer health", "system health", "pc health", "computer info", "system info"}:
+        if normalized in {"computer health", "system health", "pc health", "computer info", "system info", "mera computer health check karo"}:
             return self._action(original, "system.health")
         if normalized in {"battery", "battery status", "check battery", "how much battery"}:
             return self._action(original, "system.battery")
-        if normalized in {"lock pc", "lock computer", "lock laptop", "lock windows"}:
+        if normalized in {"lock pc", "lock computer", "lock laptop", "lock windows", "computer lock karo"}:
             return self._action(original, "system.lock")
         if normalized in {"sleep pc", "sleep computer", "sleep laptop", "put computer to sleep"}:
             return self._action(original, "system.sleep")
@@ -231,7 +237,7 @@ class LocalRouter:
             return PlannedResponse(
                 actions=[ActionRequest(tool="downloads.download", arguments=arguments, source_text=original)]
             )
-        if normalized in {"open downloads", "open downloads folder", "show downloads"}:
+        if normalized in {"open downloads", "open downloads folder", "show downloads", "downloads folder kholo"}:
             return self._action(original, "downloads.open_folder")
         if normalized in {"clear incomplete downloads", "remove incomplete downloads"}:
             return self._action(original, "downloads.clear_partial")
@@ -274,7 +280,7 @@ class LocalRouter:
         web = re.match(r"^(?:search(?: the)? web(?: for)?|google) (.+)$", original, re.I)
         if web:
             return self._action(original, "browser.search_web", query=_clean_value(web.group(1)))
-        if normalized in {"open youtube", "launch youtube"}:
+        if normalized in {"open youtube", "launch youtube", "youtube kholo"}:
             return self._action(original, "browser.open_url", url="https://www.youtube.com")
         if normalized in {"open gmail", "launch gmail"}:
             return self._action(original, "browser.open_url", url="https://mail.google.com")
@@ -282,24 +288,24 @@ class LocalRouter:
         if url:
             return self._action(original, "browser.open_url", url=_clean_value(url.group(1)))
 
-        if normalized in {"increase volume", "volume up", "turn volume up"}:
+        if normalized in {"increase volume", "volume up", "turn volume up", "volume badhao"}:
             return self._action(original, "desktop.change_volume", delta=10)
-        if normalized in {"decrease volume", "volume down", "turn volume down"}:
+        if normalized in {"decrease volume", "volume down", "turn volume down", "volume kam karo"}:
             return self._action(original, "desktop.change_volume", delta=-10)
         if normalized in {"mute", "mute volume", "unmute", "unmute volume"}:
             return self._action(original, "desktop.media_control", action="mute")
-        if "volume" in normalized:
+        if "volume" in normalized or "awaz" in normalized:
             level = _extract_level(normalized)
-            if level is not None and re.search(r"\b(?:set|change|make|put|volume)\b", normalized):
+            if level is not None and re.search(r"\b(?:set|change|make|put|volume|awaz|kar do)\b", normalized):
                 return self._action(source_text, "desktop.set_volume", level=level)
 
         if normalized in {"increase brightness", "brightness up", "turn brightness up"}:
             return self._action(original, "desktop.change_brightness", delta=10)
-        if normalized in {"decrease brightness", "brightness down", "turn brightness down"}:
+        if normalized in {"decrease brightness", "brightness down", "turn brightness down", "screen ki brightness kam karo"}:
             return self._action(original, "desktop.change_brightness", delta=-10)
         if "brightness" in normalized:
             level = _extract_level(normalized)
-            if level is not None and re.search(r"\b(?:set|change|make|put|brightness)\b", normalized):
+            if level is not None and re.search(r"\b(?:set|change|make|put|brightness|kar do)\b", normalized):
                 return self._action(source_text, "desktop.set_brightness", level=level)
 
         media = {
@@ -307,6 +313,9 @@ class LocalRouter:
             "pause": "play_pause",
             "play music": "play_pause",
             "pause music": "play_pause",
+            "pause the song": "play_pause",
+            "stop the music": "stop",
+            "play the song": "play_pause",
             "next song": "next",
             "next track": "next",
             "previous song": "previous",
@@ -316,7 +325,7 @@ class LocalRouter:
         if normalized in media:
             return self._action(original, "desktop.media_control", action=media[normalized])
 
-        if normalized in {"take screenshot", "take a screenshot", "screenshot", "capture screen"}:
+        if normalized in {"take screenshot", "take a screenshot", "screenshot", "capture screen", "screenshot le lo"}:
             return self._action(original, "desktop.screenshot")
         clipboard_copy = re.match(r"^(?:copy|put) (.+?) (?:to|on) (?:the )?clipboard$", original, re.I | re.DOTALL)
         if clipboard_copy:
@@ -414,9 +423,10 @@ class LocalRouter:
         close_app = re.match(r"^(?:close|quit|exit) (.+)$", normalized, re.I)
         if close_app:
             return self._action(original, "desktop.close_app", name=_clean_value(close_app.group(1)).lower())
-        open_app = re.match(r"^(?:open|launch|start) (.+)$", normalized, re.I)
+        open_app = re.match(r"^(?:(?:open|launch|start)\s+(.+))|(?:(.+)\s+open karo)$", normalized, re.I)
         if open_app:
-            return self._action(original, "desktop.open_app", name=_clean_value(open_app.group(1)).lower())
+            name = _clean_value(open_app.group(1) or open_app.group(2)).lower()
+            return self._action(original, "desktop.open_app", name=name)
         return None
 
     @staticmethod

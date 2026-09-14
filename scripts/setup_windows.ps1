@@ -19,6 +19,9 @@ if (-not (Test-Path ".venv")) {
 & ".\.venv\Scripts\python.exe" -m pip install --upgrade pip setuptools wheel
 & ".\.venv\Scripts\python.exe" -m pip install -e ".[windows,voice,ai,gmail,dev]"
 
+Write-Host "Installing Playwright Chromium browser..." -ForegroundColor Cyan
+& ".\.venv\Scripts\playwright.exe" install chromium
+
 if (-not (Test-Path ".env")) {
     Copy-Item ".env.example" ".env"
     Write-Host "Created .env. Add your Gemini key and correct Windows username before live use." -ForegroundColor Yellow
