@@ -452,18 +452,27 @@ class AerisAssistant:
         for spec in specs:
             self.registry.register(spec)
 
-    def handle(self, text: str, approval_callback: ApprovalCallback | None = None) -> AssistantTurn:
+    def handle(
+        self,
+        text: str,
+        approval_callback: ApprovalCallback | None = None,
+        token: Any = None,
+    ) -> AssistantTurn:
         user_text = text.strip()
+        
+        if token:
+            token.raise_if_cancelled()
+            
         plan = self.router.route(user_text)
         if plan is None and self._gemini is not None:
             try:
-                plan = self._gemini.plan(user_text, self.registry.definitions(), self.memory.recent(8))
+                plan = self._gemini.plan(user_text, self.registry.definitions(), self.memory.recent(8), token)
             except Exception as exc:
                 self.audit.write("gemini_planner_failed", error=str(exc))
                 if self._is_network_error(exc) and self._ollama is not None:
                     # Fallback to offline planner
                     try:
-                        plan = self._ollama.plan(user_text, self.registry.definitions(), self.memory.recent(8))
+                        plan = self._ollama.plan(user_text, self.registry.definitions(), self.memory.recent(8), token)
                     except Exception as ollama_exc:
                         self.audit.write("ollama_planner_failed", error=str(ollama_exc))
                         plan = PlannedResponse(reply=self._planner_failure_message(exc))
@@ -471,7 +480,7 @@ class AerisAssistant:
                     plan = PlannedResponse(reply=self._planner_failure_message(exc))
         elif plan is None and self._ollama is not None:
             try:
-                plan = self._ollama.plan(user_text, self.registry.definitions(), self.memory.recent(8))
+                plan = self._ollama.plan(user_text, self.registry.definitions(), self.memory.recent(8), token)
             except Exception as exc:
                 self.audit.write("ollama_planner_failed", error=str(exc))
                 plan = PlannedResponse(reply="Ollama offline planner failed. Say 'help' for local commands.")
@@ -494,7 +503,9 @@ class AerisAssistant:
         results: list[ActionResult] = []
         lines = [plan.reply] if plan.reply else []
         for action in plan.actions:
-            result = self.registry.execute(action, approval_callback)
+            if token:
+                token.raise_if_cancelled()
+            result = self.registry.execute(action, approval_callback, token=token)
             results.append(result)
             prefix = "[OK]" if result.success else "[FAILED]"
             lines.append(f"{prefix} {result.message}")

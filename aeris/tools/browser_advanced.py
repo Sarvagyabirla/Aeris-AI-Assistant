@@ -1,5 +1,5 @@
 import threading
-from playwright.sync_api import sync_playwright, Page, BrowserContext
+
 from ..models import ActionResult
 
 class PlaywrightContext:
@@ -14,10 +14,11 @@ class PlaywrightContext:
             return cls._instance
 
     def __init__(self):
+        from playwright.sync_api import sync_playwright
         self.playwright = sync_playwright().start()
         self.browser = self.playwright.chromium.launch(headless=False)
-        self.context: BrowserContext = self.browser.new_context()
-        self.page: Page = self.context.new_page()
+        self.context = self.browser.new_context()
+        self.page = self.context.new_page()
 
     def navigate(self, url: str) -> ActionResult:
         try:

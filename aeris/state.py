@@ -1,6 +1,27 @@
 from __future__ import annotations
 
 from typing import Any, Callable
+import threading
+
+class CancellationToken:
+    """Thread-safe cancellation token for interrupting long-running operations."""
+    def __init__(self) -> None:
+        self._event = threading.Event()
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._event.is_set()
+
+    def cancel(self) -> None:
+        self._event.set()
+
+    def raise_if_cancelled(self) -> None:
+        if self._event.is_set():
+            raise CancelledError("Operation was cancelled.")
+
+class CancelledError(Exception):
+    """Raised when an operation is cancelled via CancellationToken."""
+    pass
 
 class Store:
     """A centralized state store using a simple pub/sub pattern."""

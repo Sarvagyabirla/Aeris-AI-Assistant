@@ -4,8 +4,6 @@ import socket
 import time
 from typing import Any
 
-from google import genai
-from google.genai import types
 
 from ..models import ActionRequest, PlannedResponse
 
@@ -15,7 +13,8 @@ class GeminiPlanner:
         self.model = model
         self.logger = logging.getLogger("aeris.gemini")
         try:
-            self.client = genai.Client(api_key=self.api_key)
+            from google import genai
+            self.client = genai.Client(api_key=self.api_key, http_options={'timeout': 30})
         except Exception as e:
             self.client = None
             self.logger.error(f"Failed to initialize Gemini client: {e}")
@@ -60,9 +59,12 @@ class GeminiPlanner:
         user_text: str,
         tool_definitions: list[dict[str, Any]],
         recent_context: list[dict[str, str]] | None = None,
+        token: Any = None,
     ) -> PlannedResponse:
         if not self.client:
             raise RuntimeError("Gemini client is not initialized.")
+        if token:
+            token.raise_if_cancelled()
 
         allowed_names = {item["name"] for item in tool_definitions}
         relevant_tools = self._select_relevant_tools(user_text, tool_definitions)
@@ -109,6 +111,7 @@ USER REQUEST:
 {user_text}
 """.strip()
 
+        from google.genai import types
         config = types.GenerateContentConfig(
             response_mime_type="application/json",
             response_schema=response_schema,
@@ -118,12 +121,16 @@ USER REQUEST:
 
         max_retries = 2
         for attempt in range(max_retries):
+            if token:
+                token.raise_if_cancelled()
             try:
                 response = self.client.models.generate_content(
                     model=self.model,
                     contents=prompt,
                     config=config,
                 )
+                if token:
+                    token.raise_if_cancelled()
                 payload = json.loads(response.text)
                 
                 actions: list[ActionRequest] = []

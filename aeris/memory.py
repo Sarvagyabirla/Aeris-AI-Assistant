@@ -26,11 +26,18 @@ class MemoryStore:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_at TEXT NOT NULL,
                     role TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    classification TEXT NOT NULL DEFAULT 'LOCAL_ONLY'
+                    content TEXT NOT NULL
                 )
                 """
             )
+            # Migration: add classification column if missing
+            cursor = connection.cursor()
+            cursor.execute("PRAGMA table_info(messages)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if "classification" not in columns:
+                connection.execute(
+                    "ALTER TABLE messages ADD COLUMN classification TEXT NOT NULL DEFAULT 'LOCAL_ONLY'"
+                )
 
     def add(self, role: str, content: str, classification: str = "LOCAL_ONLY") -> None:
         if not content.strip():

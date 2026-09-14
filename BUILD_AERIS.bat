@@ -24,7 +24,7 @@ pip install pyinstaller
 
 echo.
 echo Building Aeris...
-pyinstaller --noconfirm --onedir --windowed --name "Aeris" --icon "assets\icon.ico" --add-data "aeris\assets;aeris\assets" --hidden-import "plyer.platforms.win.notification" --hidden-import "plyer.platforms.win.storagepath" --hidden-import "googleapiclient" --hidden-import "sounddevice" --hidden-import "speech_recognition" --hidden-import "keyring.backends.Windows" aeris\__main__.py
+pyinstaller --noconfirm --onedir --windowed --name "Aeris" --add-data "config;config" --hidden-import "plyer.platforms.win.notification" --hidden-import "plyer.platforms.win.storagepath" --hidden-import "googleapiclient" --hidden-import "sounddevice" --hidden-import "speech_recognition" --hidden-import "keyring.backends.Windows" aeris\__main__.py
 
 if errorlevel 1 (
     echo.

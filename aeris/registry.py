@@ -8,7 +8,8 @@ from .audit import AuditLogger
 from .models import ActionRequest, ActionResult, PermissionLevel
 from .permissions import ApprovalCallback, PermissionEngine
 
-ToolHandler = Callable[[dict[str, Any]], ActionResult]
+import inspect
+ToolHandler = Callable[..., ActionResult]
 
 
 @dataclass(frozen=True)
@@ -71,7 +72,10 @@ class ToolRegistry:
         self,
         request: ActionRequest,
         approval_callback: ApprovalCallback | None = None,
+        token: Any = None,
     ) -> ActionResult:
+        if token:
+            token.raise_if_cancelled()
         spec = self._tools.get(request.tool)
         if not spec:
             result = ActionResult(False, f"Unknown tool: {request.tool}", error="unknown_tool")
@@ -120,7 +124,13 @@ class ToolRegistry:
 
         self.audit.write("tool_started", request=self._audit_request(request))
         try:
-            result = spec.handler(dict(arguments))
+            if token:
+                token.raise_if_cancelled()
+            sig = inspect.signature(spec.handler)
+            if "token" in sig.parameters:
+                result = spec.handler(dict(arguments), token=token)
+            else:
+                result = spec.handler(dict(arguments))
         except Exception as exc:  # defensive boundary around OS integrations
             result = ActionResult(False, f"{request.tool} failed safely.", error=str(exc))
         self.audit.write(

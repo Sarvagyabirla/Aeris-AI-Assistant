@@ -235,6 +235,8 @@ class DesktopTools:
             return ActionResult(
                 False, "Install the Windows extras to control volume.", error="missing_dependency"
             )
+        except Exception as e:
+            return ActionResult(False, f"Windows audio service is unavailable: {e}", error="com_error")
         return ActionResult(True, f"Volume set to {level}%.", data={"level": level})
 
     def change_volume(self, arguments: dict[str, object]) -> ActionResult:
@@ -259,6 +261,8 @@ class DesktopTools:
             return ActionResult(
                 False, "Install the Windows extras to control volume.", error="missing_dependency"
             )
+        except Exception as e:
+            return ActionResult(False, f"Windows audio service is unavailable: {e}", error="com_error")
         return ActionResult(True, f"Volume set to {target}%.", data={"level": target})
 
     def set_brightness(self, arguments: dict[str, object]) -> ActionResult:
@@ -267,11 +271,13 @@ class DesktopTools:
         level = max(0, min(int(arguments["level"]), 100))
         try:
             import screen_brightness_control as brightness
+            brightness.set_brightness(level)
         except ImportError:
             return ActionResult(
                 False, "Install the Windows extras to control brightness.", error="missing_dependency"
             )
-        brightness.set_brightness(level)
+        except Exception as e:
+            return ActionResult(False, f"Windows display service is unavailable: {e}", error="wmi_error")
         return ActionResult(True, f"Brightness set to {level}%.", data={"level": level})
 
     def change_brightness(self, arguments: dict[str, object]) -> ActionResult:
@@ -280,14 +286,16 @@ class DesktopTools:
         delta = int(arguments.get("delta", 10))
         try:
             import screen_brightness_control as brightness
+            current_value = brightness.get_brightness()
+            current = int(current_value[0] if isinstance(current_value, list) else current_value)
+            target = max(0, min(current + delta, 100))
+            brightness.set_brightness(target)
         except ImportError:
             return ActionResult(
                 False, "Install the Windows extras to control brightness.", error="missing_dependency"
             )
-        current_value = brightness.get_brightness()
-        current = int(current_value[0] if isinstance(current_value, list) else current_value)
-        target = max(0, min(current + delta, 100))
-        brightness.set_brightness(target)
+        except Exception as e:
+            return ActionResult(False, f"Windows display service is unavailable: {e}", error="wmi_error")
         return ActionResult(True, f"Brightness set to {target}%.", data={"level": target})
 
     def media_control(self, arguments: dict[str, object]) -> ActionResult:

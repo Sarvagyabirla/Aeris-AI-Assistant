@@ -11,8 +11,9 @@ requires-python = ">=3.11,<3.14"
 license = {text = "MIT"}
 authors = [{name = "Sarvagya Birla"}]
 dependencies = [
-  "python-dotenv>=1.0.1",
-  "send2trash>=1.8.3",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.1",
+    "send2trash>=1.8.3",
 ]
 
 [project.optional-dependencies]
@@ -21,8 +22,10 @@ windows = [
   "Pillow>=10.4.0",
   "psutil>=6.0.0",
   "pyautogui>=0.9.54",
-  "pyperclip>=1.9.0",
   "pycaw==20240210",
+  "pyperclip>=1.9.0",
+  "pyside6>=6.7.0",
+  "pywin32>=306",
   "screen-brightness-control>=0.24.0",
 ]
 voice = [
@@ -32,6 +35,9 @@ voice = [
   "sounddevice>=0.5.1",
 ]
 ai = ["google-genai>=1.0.0"]
+browser = [
+  "playwright>=1.42.0",
+]
 gmail = [
   "google-api-python-client>=2.160.0",
   "google-auth-httplib2>=0.2.0",

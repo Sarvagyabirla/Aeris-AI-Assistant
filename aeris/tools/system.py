@@ -44,23 +44,27 @@ class SystemTools:
             )
         except ImportError:
             pass
+        except Exception as e:
+            data["error"] = f"Some metrics unavailable: {e}"
         return ActionResult(True, "Loaded computer health information.", data=data)
 
     def battery(self, _: dict[str, object]) -> ActionResult:
         try:
             import psutil
+            battery = psutil.sensors_battery()
+            if battery is None:
+                return ActionResult(False, "No battery was detected.", error="battery_not_found")
+            percent = round(battery.percent)
+            power = "plugged in" if battery.power_plugged else "on battery"
+            return ActionResult(
+                True,
+                f"Battery is at {percent}% and {power}.",
+                data={"percent": percent, "plugged_in": bool(battery.power_plugged)},
+            )
         except ImportError:
             return ActionResult(False, "Install psutil to read battery status.", error="missing_dependency")
-        battery = psutil.sensors_battery()
-        if battery is None:
-            return ActionResult(False, "No battery was detected.", error="battery_not_found")
-        percent = round(battery.percent)
-        power = "plugged in" if battery.power_plugged else "on battery"
-        return ActionResult(
-            True,
-            f"Battery is at {percent}% and {power}.",
-            data={"percent": percent, "plugged_in": bool(battery.power_plugged)},
-        )
+        except Exception as e:
+            return ActionResult(False, f"Could not read battery status: {e}", error="wmi_error")
 
     def lock(self, _: dict[str, object]) -> ActionResult:
         if failure := self._require_windows():
