@@ -17,7 +17,9 @@ class VoiceService:
         "Aeris, Arish, Airis Windows assistant commands. Open Chrome. Open YouTube. "
         "Set volume to fifty percent. Set brightness to sixty percent. "
         "Play music. Pause music. Look at my screen. Explain this error. "
-        "Write Python code for an expense tracker. Take a screenshot."
+        "Write Python code for an expense tracker. Take a screenshot. "
+        "Chrome kholo. Volume kam karo. Screen dekho. Kya error hai? Mute kar do. "
+        "Batao ye kaise karna hai. Calendar dikhao. Mail bhejo."
     )
 
     def __init__(

@@ -106,7 +106,7 @@ Rules:
 - Prefer Python for AI/ML or unspecified requests. Use simple architecture and helpful comments.
 {repair_context}
 """.strip()
-        client = genai.Client(api_key=self.api_key)
+        client = genai.Client(api_key=self.api_key, http_options={'timeout': 30})
         response = client.models.generate_content(
             model=self.model,
             contents=prompt,

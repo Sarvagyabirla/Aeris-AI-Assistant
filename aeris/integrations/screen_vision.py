@@ -50,7 +50,7 @@ class ScreenVision:
                 "When code or an error is visible, explain the cause and give precise safe next steps. Keep the answer "
                 f"practical and concise. User request: {question}"
             )
-            client = genai.Client(api_key=self.api_key)
+            client = genai.Client(api_key=self.api_key, http_options={'timeout': 30})
             response = client.models.generate_content(
                 model=self.model,
                 contents=[
@@ -105,7 +105,7 @@ class ScreenVision:
                         "If nothing relevant has occurred, reply EXACTLY with 'NOTHING'."
                     )
                     
-                    client = genai.Client(api_key=self.api_key)
+                    client = genai.Client(api_key=self.api_key, http_options={'timeout': 30})
                     response = client.models.generate_content(
                         model=self.model,
                         contents=[instruction, types.Part.from_bytes(data=buffer.getvalue(), mime_type="image/jpeg")],

@@ -134,9 +134,16 @@ def main(argv: list[str] | None = None) -> int:
             if os.name == "nt":
                 ctypes.windll.user32.MessageBoxW(0, "Aeris is already running.", "Aeris", 0x40)
             return 0
-        from .ui import launch_desktop
-
-        return launch_desktop(assistant)
+        try:
+            from .ui import launch_desktop
+            return launch_desktop(assistant)
+        except Exception as e:
+            if os.name == "nt":
+                import traceback
+                error_msg = f"Aeris crashed during startup:\n\n{traceback.format_exc()}"
+                ctypes.windll.user32.MessageBoxW(0, error_msg, "Aeris Error", 0x10)
+            print(f"GUI Error: {e}")
+            return 1
     if args.once:
         turn = assistant.handle(args.once, approval_prompt)
         print(turn.reply)

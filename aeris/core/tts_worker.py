@@ -1,8 +1,6 @@
 import queue
 import threading
 import time
-import pythoncom
-import pyttsx3
 
 class TTSWorker:
     def __init__(self, rate: int = 175):
@@ -46,6 +44,8 @@ class TTSWorker:
         self._queue.put(text)
 
     def _worker_loop(self):
+        import pythoncom
+        import pyttsx3
         # Initialize COM on this background thread safely
         pythoncom.CoInitialize()
         try:

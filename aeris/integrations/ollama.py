@@ -49,7 +49,10 @@ class OllamaPlanner:
         user_text: str,
         tool_definitions: list[dict[str, Any]],
         recent_context: list[dict[str, str]] | None = None,
+        token: Any = None,
     ) -> PlannedResponse:
+        if token:
+            token.raise_if_cancelled()
         allowed_names = {item["name"] for item in tool_definitions}
         relevant_tools = self._select_relevant_tools(user_text, tool_definitions)
 
@@ -91,12 +94,16 @@ USER REQUEST:
         }
 
         try:
+            if token:
+                token.raise_if_cancelled()
             req = urllib.request.Request(
                 self.endpoint,
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"}
             )
             with urllib.request.urlopen(req, timeout=10) as response:
+                if token:
+                    token.raise_if_cancelled()
                 result = json.loads(response.read().decode("utf-8"))
                 output = json.loads(result.get("response", "{}"))
                 

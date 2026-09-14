@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import logging
 from pathlib import Path
 
 from ..models import ActionResult
@@ -13,6 +14,8 @@ from .filesystem import PathGuard
 
 _INSTALLER_EXTENSIONS = {".appx", ".exe", ".msi", ".msix", ".msixbundle"}
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+logger = logging.getLogger("aeris.packages")
 
 
 class PackageTools:
@@ -74,6 +77,11 @@ class PackageTools:
                 "Windows Package Manager (winget) is missing. Install or update App Installer from Microsoft Store.",
                 error="winget_missing",
             )
+        
+        command_str = " ".join([executable, *arguments])
+        logger.info(f"Executing package manager command: {command_str}")
+        print(f"[PackageTools] Executing package manager command: {command_str}")
+        
         try:
             completed = subprocess.run(
                 [executable, *arguments],
@@ -229,17 +237,21 @@ class PackageTools:
                 error="invalid_signature",
             )
 
+        logger.info(f"Executing installer: {path}")
+        print(f"[PackageTools] Executing installer: {path}")
         try:
             if path.suffix.lower() == ".msi":
+                # Let the OS prompt for UAC instead of wrapping with 'runas'
                 result = int(
                     __import__("ctypes").windll.shell32.ShellExecuteW(
-                        None, "runas", "msiexec.exe", f'/i "{path}"', str(path.parent), 1
+                        None, "open", "msiexec.exe", f'/i "{path}"', str(path.parent), 1
                     )
                 )
             elif path.suffix.lower() == ".exe":
+                # Let the OS prompt for UAC if the installer manifest requires it
                 result = int(
                     __import__("ctypes").windll.shell32.ShellExecuteW(
-                        None, "runas", str(path), None, str(path.parent), 1
+                        None, "open", str(path), None, str(path.parent), 1
                     )
                 )
             else:

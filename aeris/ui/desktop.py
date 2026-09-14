@@ -20,7 +20,9 @@ from PySide6.QtWidgets import (
 
 from ..assistant import AerisAssistant
 from ..models import ActionRequest, PermissionLevel
-from ..state import app_store
+from ..state import app_store, CancellationToken, CancelledError
+import queue
+import uuid
 
 class AssistantWorker(QThread):
     """Background worker for running the assistant without blocking the UI."""
@@ -31,15 +33,43 @@ class AssistantWorker(QThread):
     def __init__(self, assistant: AerisAssistant, parent: QWidget | None = None):
         super().__init__(parent)
         self.assistant = assistant
-        self.pending_input: str | None = None
+        self.command_queue: queue.Queue[tuple[str, str]] = queue.Queue(maxsize=1)
+        self.current_token: CancellationToken | None = None
         self._lock = threading.Lock()
         self._permission_result: bool | None = None
         self._permission_event = threading.Event()
+        self._stop_event = threading.Event()
 
-    def process_command(self, text: str) -> None:
+    def process_command(self, text: str) -> bool:
+        """Returns True if accepted, False if busy."""
+        command_id = str(uuid.uuid4())
+        try:
+            self.command_queue.put_nowait((command_id, text))
+            return True
+        except queue.Full:
+            return False
+
+    def cancel_current(self) -> None:
+        """Interrupts the currently running command."""
         with self._lock:
-            self.pending_input = text
-        self.start()
+            if self.current_token:
+                self.current_token.cancel()
+        self._permission_result = False
+        self._permission_event.set()
+        
+        # Clear any pending commands
+        try:
+            self.command_queue.get_nowait()
+        except queue.Empty:
+            pass
+
+    def stop_worker(self) -> None:
+        self._stop_event.set()
+        self.cancel_current()
+        try:
+            self.command_queue.put_nowait(("stop", ""))
+        except queue.Full:
+            pass
 
     def provide_permission(self, allowed: bool) -> None:
         self._permission_result = allowed
@@ -52,21 +82,35 @@ class AssistantWorker(QThread):
         return bool(self._permission_result)
 
     def run(self) -> None:
-        with self._lock:
-            text = self.pending_input
-            self.pending_input = None
+        while not self._stop_event.is_set():
+            try:
+                cmd_id, text = self.command_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
 
-        if not text:
-            return
+            if self._stop_event.is_set():
+                break
 
-        self.status_updated.emit("Thinking...")
-        try:
-            turn = self.assistant.handle(text, self._approval_callback)
-            self.response_ready.emit(text, turn.reply)
-        except Exception as e:
-            self.response_ready.emit(text, f"Error: {e}")
-        finally:
-            self.status_updated.emit("Ready")
+            token = CancellationToken()
+            with self._lock:
+                self.current_token = token
+
+            self.status_updated.emit("Thinking...")
+            try:
+                turn = self.assistant.handle(text, self._approval_callback, token)
+                if token.is_cancelled:
+                    self.response_ready.emit(text, "Command cancelled.")
+                else:
+                    self.response_ready.emit(text, turn.reply)
+            except CancelledError:
+                self.response_ready.emit(text, "Command cancelled.")
+            except Exception as e:
+                self.response_ready.emit(text, f"Error: {e}")
+            finally:
+                with self._lock:
+                    self.current_token = None
+                self.status_updated.emit("Ready")
+
 
 class DashboardTab(QWidget):
     def __init__(self, worker: AssistantWorker, parent: QWidget | None = None):
@@ -95,8 +139,13 @@ class DashboardTab(QWidget):
         self.send_btn = QPushButton("Send")
         self.send_btn.clicked.connect(self.send_command)
 
+        self.stop_btn = QPushButton("Stop")
+        self.stop_btn.clicked.connect(self.worker.cancel_current)
+        self.stop_btn.setStyleSheet("background-color: #CC0000;")
+
         input_layout.addWidget(self.input_field)
         input_layout.addWidget(self.send_btn)
+        input_layout.addWidget(self.stop_btn)
         layout.addLayout(input_layout)
 
         # Connect signals
@@ -107,9 +156,12 @@ class DashboardTab(QWidget):
     def send_command(self) -> None:
         text = self.input_field.text().strip()
         if text:
-            self.chat_history.addItem(f"You: {text}")
-            self.input_field.clear()
-            self.worker.process_command(text)
+            if self.worker.process_command(text):
+                self.chat_history.addItem(f"You: {text}")
+                self.input_field.clear()
+            else:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Busy", "Aeris is currently busy. Please wait or press Stop.")
 
     @Slot(str, str)
     def on_response(self, user_input: str, reply: str) -> None:
@@ -138,11 +190,17 @@ class AerisMainWindow(QMainWindow):
         super().__init__()
         self.assistant = assistant
         self.worker = AssistantWorker(assistant, self)
+        self.worker.start()
         
         self.setWindowTitle("Aeris Assistant")
         self.resize(800, 600)
         self.setup_ui()
         self.setup_styling()
+        
+    def closeEvent(self, event: Any) -> None:
+        self.worker.stop_worker()
+        self.worker.wait(2000)
+        super().closeEvent(event)
         
     def setup_ui(self) -> None:
         self.tabs = QTabWidget()
