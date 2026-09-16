@@ -1,9 +1,12 @@
 import sys
 import threading
 import time
+
 from PySide6.QtWidgets import QApplication
+
 from aeris.assistant import AerisAssistant
 from aeris.ui.desktop import AerisMainWindow
+
 
 def verify_stop_button():
     app = QApplication(sys.argv)
@@ -20,14 +23,12 @@ def verify_stop_button():
     # We patch the router to return a slow action instead of using Gemini
     original_route = assistant.router.route
     def mock_route(text):
-        from aeris.models import PlannedResponse, ActionRequest
+        from aeris.models import ActionRequest, PlannedResponse
         if text == "sleep test":
             return PlannedResponse(reply="Sleeping", actions=[ActionRequest(tool="system.status", arguments={})])
         return original_route(text)
         
     assistant.router.route = mock_route
-    # Mock system.status to be slow
-    original_status = assistant.registry.definitions
     
     class DummyToken:
         def raise_if_cancelled(self):

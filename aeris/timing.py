@@ -1,5 +1,6 @@
-import time
 import logging
+import time
+
 
 class StageTimer:
     def __init__(self, logger_name: str = "aeris.timing"):

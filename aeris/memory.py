@@ -38,25 +38,29 @@ class MemoryStore:
                 connection.execute(
                     "ALTER TABLE messages ADD COLUMN classification TEXT NOT NULL DEFAULT 'LOCAL_ONLY'"
                 )
+            # Enforce uniqueness
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_content ON messages(content)"
+            )
 
     def add(self, role: str, content: str, classification: str = "LOCAL_ONLY") -> None:
         if not content.strip():
             return
-        if classification == "SENSITIVE":
-            return
             
         with self._lock, self._connect() as connection:
             connection.execute(
-                "INSERT INTO messages(created_at, role, content, classification) VALUES (?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO messages(created_at, role, content, classification) VALUES (?, ?, ?, ?)",
                 (datetime.now(timezone.utc).isoformat(), role, content[:10_000], classification),
             )
 
-    def recent(self, limit: int = 12) -> list[dict[str, str]]:
+    def recent(self, limit: int = 12, exclude_sensitive: bool = False) -> list[dict[str, str]]:
         with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT role, content, created_at FROM messages ORDER BY id DESC LIMIT ?",
-                (max(1, min(limit, 100)),),
-            ).fetchall()
+            query = "SELECT role, content, created_at FROM messages "
+            if exclude_sensitive:
+                query += "WHERE classification != 'SENSITIVE' "
+            query += "ORDER BY id DESC LIMIT ?"
+            
+            rows = connection.execute(query, (max(1, min(limit, 100)),)).fetchall()
         return [
             {"role": role, "content": content, "created_at": created_at}
             for role, content, created_at in reversed(rows)

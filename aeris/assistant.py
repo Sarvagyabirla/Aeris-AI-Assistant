@@ -4,6 +4,7 @@ import json
 import socket
 from typing import Any
 
+from . import schemas
 from .audit import AuditLogger
 from .config import AerisConfig
 from .integrations.gemini import GeminiPlanner
@@ -16,10 +17,9 @@ from .models import ActionRequest, ActionResult, AssistantTurn, PermissionLevel,
 from .permissions import ApprovalCallback, PermissionEngine
 from .registry import ToolRegistry, ToolSpec
 from .router import LocalRouter
-from . import schemas
 from .tools import (
-    BrowserTools,
     BrowserAdvancedTools,
+    BrowserTools,
     CodingTools,
     DesktopTools,
     DownloadTools,
@@ -48,7 +48,7 @@ class AerisAssistant:
     def _register_tools(self) -> None:
         desktop = DesktopTools(self.config.app_catalog_file, self.config.data_dir / "screenshots")
         browser = BrowserTools(self.config.allowed_domains)
-        browser_adv = BrowserAdvancedTools()
+        browser_adv = BrowserAdvancedTools(self.config.allowed_domains)
         files = FilesystemTools(self.config.allowed_paths)
         downloads = DownloadTools(
             self.config.download_dir,
@@ -466,7 +466,7 @@ class AerisAssistant:
         plan = self.router.route(user_text)
         if plan is None and self._gemini is not None:
             try:
-                plan = self._gemini.plan(user_text, self.registry.definitions(), self.memory.recent(8), token)
+                plan = self._gemini.plan(user_text, self.registry.definitions(), self.memory.recent(8, exclude_sensitive=True), token)
             except Exception as exc:
                 self.audit.write("gemini_planner_failed", error=str(exc))
                 if self._is_network_error(exc) and self._ollama is not None:

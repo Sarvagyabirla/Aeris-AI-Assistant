@@ -1,7 +1,7 @@
-import numpy as np
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from aeris.integrations.voice import VoiceService
+
 
 def test_voice_defaults():
     voice = VoiceService()
@@ -23,10 +23,16 @@ def test_voice_silence_detection(mock_input_stream):
     mock_stream_instance = MagicMock()
     mock_input_stream.return_value.__enter__.return_value = mock_stream_instance
     
-    # We won't simulate actual audio frames here since the callback is asynchronous, 
-    # but we can verify it doesn't wait the full max_record_seconds when cancelled.
-    voice.cancel_recording()
+    import threading
+    import time
+    def cancel():
+        time.sleep(0.1)
+        voice.cancel_recording()
+        
+    t = threading.Thread(target=cancel)
+    t.start()
     res = voice.listen_once()
+    t.join()
     assert res == ""
 
 @patch('sounddevice.InputStream')

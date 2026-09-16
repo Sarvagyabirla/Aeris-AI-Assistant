@@ -67,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--gui", action="store_true", help="Open the Aeris desktop interface")
     parser.add_argument("--live", action="store_true", help="Execute actions instead of dry-run simulation")
     parser.add_argument("--no-ai", action="store_true", help="Disable Gemini planning")
+    parser.add_argument("--self-test", action="store_true", help="Run self-diagnostics and tests")
     return parser
 
 
@@ -128,6 +129,24 @@ def voice_loop(assistant: AerisAssistant) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    
+    if args.self_test:
+        print("Running self-test diagnostics...")
+        import subprocess
+        try:
+            res = subprocess.run([sys.executable, "-m", "pytest"], capture_output=True, text=True)
+            print(res.stdout)
+            if res.returncode != 0:
+                print("Self-test FAILED.")
+                if res.stderr:
+                    print(res.stderr)
+                return res.returncode
+            print("Self-test PASSED.")
+            return 0
+        except Exception as e:
+            print(f"Self-test execution failed: {e}")
+            return 1
+
     assistant = _assistant_from_args(args)
     if args.gui:
         if not _acquire_gui_instance():

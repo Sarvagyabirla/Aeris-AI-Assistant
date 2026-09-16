@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import Any, Callable
+
 import pydantic
 
 from .audit import AuditLogger
 from .models import ActionRequest, ActionResult, PermissionLevel
 from .permissions import ApprovalCallback, PermissionEngine
 
-import inspect
 ToolHandler = Callable[..., ActionResult]
 
 

@@ -2,6 +2,7 @@ import queue
 import threading
 import time
 
+
 class TTSWorker:
     def __init__(self, rate: int = 175):
         self._queue = queue.Queue()
@@ -27,6 +28,11 @@ class TTSWorker:
                 self._engine.stop()
             except Exception:
                 pass
+        try:
+            while True:
+                self._queue.get_nowait()
+        except queue.Empty:
+            pass
         self._queue.put(None) # Sentinel
 
     def set_rate(self, rate: int):

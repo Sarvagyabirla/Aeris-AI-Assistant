@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from io import BytesIO
 import threading
 import time
+from io import BytesIO
 
 from ..models import ActionResult
 from ..state import app_store
@@ -50,7 +50,7 @@ class ScreenVision:
                 "When code or an error is visible, explain the cause and give precise safe next steps. Keep the answer "
                 f"practical and concise. User request: {question}"
             )
-            client = genai.Client(api_key=self.api_key, http_options={'timeout': 30})
+            client = genai.Client(api_key=self.api_key, http_options={'timeout': 30_000})
             response = client.models.generate_content(
                 model=self.model,
                 contents=[
@@ -90,9 +90,9 @@ class ScreenVision:
                     
                 # We can reuse inspect logic directly
                 try:
-                    from PIL import ImageGrab
                     from google import genai
                     from google.genai import types
+                    from PIL import ImageGrab
                     
                     image = ImageGrab.grab(all_screens=True)
                     image.thumbnail((1920, 1080))
@@ -105,7 +105,7 @@ class ScreenVision:
                         "If nothing relevant has occurred, reply EXACTLY with 'NOTHING'."
                     )
                     
-                    client = genai.Client(api_key=self.api_key, http_options={'timeout': 30})
+                    client = genai.Client(api_key=self.api_key, http_options={'timeout': 30_000})
                     response = client.models.generate_content(
                         model=self.model,
                         contents=[instruction, types.Part.from_bytes(data=buffer.getvalue(), mime_type="image/jpeg")],

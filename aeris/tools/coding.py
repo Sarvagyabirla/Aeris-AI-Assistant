@@ -106,7 +106,7 @@ Rules:
 - Prefer Python for AI/ML or unspecified requests. Use simple architecture and helpful comments.
 {repair_context}
 """.strip()
-        client = genai.Client(api_key=self.api_key, http_options={'timeout': 30})
+        client = genai.Client(api_key=self.api_key, http_options={'timeout': 30_000})
         response = client.models.generate_content(
             model=self.model,
             contents=prompt,
@@ -262,6 +262,21 @@ Rules:
             },
         )
 
+    def _resolve_in_workspace(self, path_str: str) -> Path:
+        raw = path_str.strip().replace("\\", "/")
+        rel_path = PurePosixPath(raw)
+        if not raw or rel_path.is_absolute() or ".." in rel_path.parts or ":" in raw or "\0" in raw:
+            raise ValueError(f"Path must be strictly relative to the workspace: {raw!r}")
+        
+        target = self.workspace.joinpath(*rel_path.parts).resolve()
+        
+        try:
+            target.relative_to(self.workspace)
+        except ValueError:
+            raise ValueError("Path escapes workspace boundary.")
+            
+        return self.guard.resolve(target)
+
     def search_workspace(self, arguments: dict[str, object]) -> ActionResult:
         query = str(arguments["query"]).strip()
         if not query:
@@ -291,12 +306,15 @@ Rules:
         return ActionResult(True, f"Found {len(matches)} matches.", data={"matches": matches})
 
     def apply_diff(self, arguments: dict[str, object]) -> ActionResult:
-        # A simple replacement logic based on old/new content
         path_str = str(arguments["path"])
         old_content = str(arguments["old_content"])
         new_content = str(arguments["new_content"])
         
-        target = self.guard.resolve(self.workspace / path_str)
+        try:
+            target = self._resolve_in_workspace(path_str)
+        except ValueError as e:
+            return ActionResult(False, str(e), error="invalid_path")
+            
         if not target.exists() or not target.is_file():
             return ActionResult(False, f"File not found: {target}", error="file_not_found")
             
@@ -305,10 +323,13 @@ Rules:
             
         try:
             current = target.read_text(encoding="utf-8")
-            if old_content not in current:
+            old_norm = old_content.replace("\r\n", "\n")
+            curr_norm = current.replace("\r\n", "\n")
+            
+            if old_norm not in curr_norm:
                 return ActionResult(False, "Old content block not found exactly in the file.", error="patch_failed")
                 
-            updated = current.replace(old_content, new_content, 1)
+            updated = curr_norm.replace(old_norm, new_content.replace("\r\n", "\n"), 1)
             target.write_text(updated, encoding="utf-8")
             return ActionResult(True, f"Applied diff to {target.name}", data={"path": str(target)})
         except Exception as e:

@@ -1,12 +1,11 @@
-import math
 import queue
 import tempfile
 import threading
 import wave
 from pathlib import Path
-from typing import Any, Callable
 
 from aeris.core.tts_worker import global_tts
+
 
 class VoiceUnavailableError(RuntimeError):
     pass
@@ -113,12 +112,18 @@ class VoiceService:
         silence_limit = int((self.silence_timeout_ms / 1000.0) * sample_rate)
 
         try:
+            import time
             with sd.InputStream(samplerate=sample_rate, channels=1, dtype='int16', blocksize=frames_per_buffer, callback=callback):
+                last_frame_time = time.monotonic()
                 while not self._cancel_flag and total_frames < max_frames:
                     try:
                         chunk = q.get(timeout=0.2)
                     except queue.Empty:
+                        if time.monotonic() - last_frame_time > 2.0:
+                            raise VoiceUnavailableError("Audio capture timed out (no frames received).")
                         continue
+                        
+                    last_frame_time = time.monotonic()
                         
                     audio_data.append(chunk)
                     total_frames += len(chunk)
@@ -159,12 +164,12 @@ class VoiceService:
             model = self._get_or_load_model()
             
             try:
-                segments, _ = model.transcribe(
+                segments = list(model.transcribe(
                     str(wav_path),
                     vad_filter=True,
                     language=self.language,
                     initial_prompt=self.COMMAND_PROMPT,
-                )
+                )[0])
             except RuntimeError as exc:
                 if self.device == "cpu" or not any(
                     marker in str(exc).lower() for marker in ("cublas", "cudnn", "cuda")
@@ -174,12 +179,12 @@ class VoiceService:
                 self.device = "cpu"
                 self._model = None # Force reload
                 model = self._get_or_load_model()
-                segments, _ = model.transcribe(
+                segments = list(model.transcribe(
                     str(wav_path),
                     vad_filter=True,
                     language=self.language,
                     initial_prompt=self.COMMAND_PROMPT,
-                )
+                )[0])
                 
             return " ".join(segment.text.strip() for segment in segments).strip()
         finally:

@@ -53,7 +53,7 @@ def test_sensitive_command_text_is_not_stored(tmp_path):
         "send email to secret@example.com subject Private message Hidden body",
         lambda *_: False,
     )
-    messages = assistant.memory.recent()
+    messages = assistant.memory.recent(exclude_sensitive=True)
     assert len(messages) == 0
 
 

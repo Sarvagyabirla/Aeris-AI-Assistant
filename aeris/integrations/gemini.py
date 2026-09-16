@@ -4,8 +4,8 @@ import socket
 import time
 from typing import Any
 
-
 from ..models import ActionRequest, PlannedResponse
+
 
 class GeminiPlanner:
     def __init__(self, api_key: str, model: str):
@@ -14,7 +14,7 @@ class GeminiPlanner:
         self.logger = logging.getLogger("aeris.gemini")
         try:
             from google import genai
-            self.client = genai.Client(api_key=self.api_key, http_options={'timeout': 30})
+            self.client = genai.Client(api_key=self.api_key, http_options={'timeout': 30_000})
         except Exception as e:
             self.client = None
             self.logger.error(f"Failed to initialize Gemini client: {e}")
@@ -25,7 +25,6 @@ class GeminiPlanner:
         selected = []
         for tool in tool_definitions:
             name = tool["name"].lower()
-            desc = tool.get("description", "").lower()
             # If it's a core system tool or very basic, keep it. 
             if name.startswith("system."):
                 selected.append(tool)
@@ -45,6 +44,8 @@ class GeminiPlanner:
             elif name.startswith("downloads.") and any(kw in text for kw in ("download", "get")):
                 selected.append(tool)
             elif name.startswith("vision.") and any(kw in text for kw in ("look", "screen", "see", "read", "explain")):
+                selected.append(tool)
+            elif name.startswith("calendar.") and any(kw in text for kw in ("calendar", "event", "meeting", "schedule", "appointment")):
                 selected.append(tool)
             elif name.startswith("coding.") and any(kw in text for kw in ("code", "program", "app", "project", "build")):
                 selected.append(tool)
@@ -150,7 +151,7 @@ USER REQUEST:
                     
                 return PlannedResponse(reply=str(payload.get("reply", "")).strip(), actions=actions)
                 
-            except (ConnectionError, TimeoutError, socket.gaierror) as e:
+            except (ConnectionError, TimeoutError, socket.gaierror):
                 if attempt == max_retries - 1:
                     raise
                 time.sleep(1) # Transient error retry

@@ -34,7 +34,7 @@ def _default_allowed_paths() -> tuple[Path, ...]:
     return existing or (home.resolve(),)
 
 
-@dataclass(frozen=True)
+@dataclass
 class AerisConfig:
     data_dir: Path
     allowed_paths: tuple[Path, ...]
@@ -70,7 +70,28 @@ class AerisConfig:
     def load(cls) -> "AerisConfig":
         _load_dotenv()
         data_dir = Path(os.getenv("AERIS_DATA_DIR", str(_default_data_dir()))).expanduser().resolve()
-        configured_paths = os.getenv("AERIS_ALLOWED_PATHS", "").strip()
+        
+        settings_file = data_dir / "settings.json"
+        settings = {}
+        if settings_file.exists():
+            import json
+            try:
+                settings = json.loads(settings_file.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+                
+        def get_val(key: str, env_key: str, default: str) -> str:
+            if key in settings and settings[key] is not None:
+                return str(settings[key])
+            val = os.getenv(env_key)
+            return val if val is not None else default
+            
+        def get_bool(key: str, env_key: str, default: bool) -> bool:
+            if key in settings and settings[key] is not None:
+                return str(settings[key]).strip().lower() in {"1", "true", "yes", "on", "true"} if isinstance(settings[key], str) else bool(settings[key])
+            return _env_bool(env_key, default)
+
+        configured_paths = get_val("allowed_paths", "AERIS_ALLOWED_PATHS", "").strip()
         if configured_paths:
             allowed_paths = tuple(
                 Path(item).expanduser().resolve()
@@ -82,7 +103,7 @@ class AerisConfig:
 
         domains = tuple(
             item.strip().lower()
-            for item in os.getenv("AERIS_ALLOWED_DOMAINS", "*").split(",")
+            for item in get_val("allowed_domains", "AERIS_ALLOWED_DOMAINS", "*").split(",")
             if item.strip()
         ) or ("*",)
 
@@ -90,35 +111,32 @@ class AerisConfig:
         return cls(
             data_dir=data_dir,
             allowed_paths=allowed_paths,
-            dry_run=_env_bool("AERIS_DRY_RUN", True),
-            ai_enabled=_env_bool("AERIS_AI_ENABLED", True),
-            gemini_api_key=os.getenv("GEMINI_API_KEY") or None,
-            gemini_model=os.getenv("AERIS_GEMINI_MODEL", "gemini-3.6-flash"),
+            dry_run=get_bool("dry_run", "AERIS_DRY_RUN", True),
+            ai_enabled=get_bool("ai_enabled", "AERIS_AI_ENABLED", True),
+            gemini_api_key=get_val("gemini_api_key", "GEMINI_API_KEY", "") or None,
+            gemini_model=get_val("gemini_model", "AERIS_GEMINI_MODEL", "gemini-3.6-flash"),
             allowed_domains=domains,
-            voice_model=os.getenv("AERIS_VOICE_MODEL", "small"),
-            voice_record_seconds=max(2, int(os.getenv("AERIS_VOICE_SECONDS", "6"))),
-            voice_device=os.getenv("AERIS_VOICE_DEVICE", "cpu").strip().lower(),
-            voice_language=os.getenv("AERIS_VOICE_LANGUAGE", "en").strip().lower(),
+            voice_model=get_val("voice_model", "AERIS_VOICE_MODEL", "small"),
+            voice_record_seconds=max(2, int(get_val("voice_record_seconds", "AERIS_VOICE_SECONDS", "6"))),
+            voice_device=get_val("voice_device", "AERIS_VOICE_DEVICE", "cpu").strip().lower(),
+            voice_language=get_val("voice_language", "AERIS_VOICE_LANGUAGE", "en").strip().lower(),
             gmail_credentials_file=Path(
-                os.getenv("AERIS_GMAIL_CREDENTIALS", "credentials.json")
+                get_val("gmail_credentials_file", "AERIS_GMAIL_CREDENTIALS", "credentials.json")
             ).expanduser(),
-            app_catalog_file=Path(os.getenv("AERIS_APP_CATALOG", "config/apps.windows.json")).expanduser(),
+            app_catalog_file=Path(get_val("app_catalog_file", "AERIS_APP_CATALOG", "config/apps.windows.json")).expanduser(),
             package_catalog_file=Path(
-                os.getenv("AERIS_PACKAGE_CATALOG", "config/packages.windows.json")
+                get_val("package_catalog_file", "AERIS_PACKAGE_CATALOG", "config/packages.windows.json")
             ).expanduser(),
             download_dir=Path(
-                os.getenv("AERIS_DOWNLOAD_DIR", str(Path.home() / "Downloads"))
+                get_val("download_dir", "AERIS_DOWNLOAD_DIR", str(Path.home() / "Downloads"))
             ).expanduser().resolve(),
-            max_download_mb=max(1, int(os.getenv("AERIS_MAX_DOWNLOAD_MB", "2048"))),
-            require_signed_installers=_env_bool("AERIS_REQUIRE_SIGNED_INSTALLERS", True),
-            hands_free=_env_bool("AERIS_HANDS_FREE", True),
-            wake_word=os.getenv("AERIS_WAKE_WORD", "aeris").strip().lower() or "aeris",
-            startup_greeting=_env_bool("AERIS_STARTUP_GREETING", True),
+            max_download_mb=max(1, int(get_val("max_download_mb", "AERIS_MAX_DOWNLOAD_MB", "2048"))),
+            require_signed_installers=get_bool("require_signed_installers", "AERIS_REQUIRE_SIGNED_INSTALLERS", True),
+            hands_free=get_bool("hands_free", "AERIS_HANDS_FREE", True),
+            wake_word=get_val("wake_word", "AERIS_WAKE_WORD", "aeris").strip().lower() or "aeris",
+            startup_greeting=get_bool("startup_greeting", "AERIS_STARTUP_GREETING", True),
             coding_workspace=Path(
-                os.getenv(
-                    "AERIS_CODING_WORKSPACE",
-                    str(Path.home() / "Documents" / "Aeris Projects"),
-                )
+                get_val("coding_workspace", "AERIS_CODING_WORKSPACE", str(Path.home() / "Documents" / "Aeris Projects"))
             ).expanduser().resolve(),
         )
 
@@ -143,3 +161,33 @@ class AerisConfig:
             "wake_word": self.wake_word,
             "coding_workspace": str(self.coding_workspace),
         }
+
+    def save(self) -> None:
+        import json
+        settings_file = self.data_dir / "settings.json"
+        
+        # Merge with existing
+        settings = {}
+        if settings_file.exists():
+            try:
+                settings = json.loads(settings_file.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+                
+        settings.update({
+            "dry_run": self.dry_run,
+            "ai_enabled": self.ai_enabled,
+            "gemini_model": self.gemini_model,
+            "voice_model": self.voice_model,
+            "voice_language": self.voice_language,
+            "voice_record_seconds": self.voice_record_seconds,
+            "wake_word": self.wake_word,
+            "hands_free": self.hands_free,
+            "startup_greeting": self.startup_greeting,
+            "require_signed_installers": self.require_signed_installers,
+            "max_download_mb": self.max_download_mb
+        })
+        if self.gemini_api_key:
+            settings["gemini_api_key"] = self.gemini_api_key
+            
+        settings_file.write_text(json.dumps(settings, indent=4), encoding="utf-8")

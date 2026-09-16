@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Callable
 import threading
+from typing import Any, Callable
+
 
 class CancellationToken:
     """Thread-safe cancellation token for interrupting long-running operations."""
