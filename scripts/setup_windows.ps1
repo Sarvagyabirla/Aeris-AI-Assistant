@@ -13,7 +13,7 @@ function Invoke-Native {
 Write-Host "Setting up Aeris with Python 3.11..." -ForegroundColor Cyan
 
 try {
-    py -3.11 --version
+    Invoke-Native { py -3.11 --version }
 }
 catch {
     Write-Host "Python 3.11 is required. Install it from python.org, then run this script again." -ForegroundColor Red
@@ -24,8 +24,8 @@ if (-not (Test-Path ".venv")) {
     Invoke-Native { py -3.11 -m venv ".venv" }
 }
 
-Invoke-Native { & ".\.venv\Scripts\python.exe" -m pip install --upgrade pip setuptools wheel }
-Invoke-Native { & ".\.venv\Scripts\python.exe" -m pip install -e ".[windows,voice,ai,gmail,browser,dev]" }
+Invoke-Native { & ".\.venv\Scripts\python.exe" -m pip install -r requirements-lock.txt }
+Invoke-Native { & ".\.venv\Scripts\python.exe" -m pip install --no-deps -e "." }
 
 Write-Host "Installing Playwright Chromium browser..." -ForegroundColor Cyan
 Invoke-Native { & ".\.venv\Scripts\playwright.exe" install chromium }

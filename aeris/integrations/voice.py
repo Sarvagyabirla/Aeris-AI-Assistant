@@ -42,6 +42,7 @@ class VoiceService:
         self._model_state = "Not loaded"
         self._speaker = None
         self._cancel_flag = False
+        self._preload_thread = None
 
     def preload_model(self) -> None:
         """Loads the Whisper model in a background thread."""
@@ -53,8 +54,10 @@ class VoiceService:
             except Exception as e:
                 self._model_state = f"Failed: {e}"
         
-        thread = threading.Thread(target=load_task, daemon=True)
-        thread.start()
+        if self._preload_thread and self._preload_thread.is_alive():
+            return
+        self._preload_thread = threading.Thread(target=load_task, daemon=True, name="Aeris-ASR-load")
+        self._preload_thread.start()
 
     def _get_or_load_model(self):
         with self._model_lock:
@@ -87,21 +90,29 @@ class VoiceService:
     def cancel_recording(self):
         self._cancel_flag = True
 
+    def begin_session(self):
+        """Only the capture owner starts a new session; listen_once never resets cancellation."""
+        self._cancel_flag = False
+
     def listen_once(self) -> str:
+        if self._cancel_flag:
+            return ""
         try:
             import numpy as np
             import sounddevice as sd
         except ImportError as exc:
             raise VoiceUnavailableError("Voice packages are missing.") from exc
 
-        self._cancel_flag = False
         sample_rate = 16_000
-        q = queue.Queue()
+        q = queue.Queue(maxsize=80)
         
         def callback(indata, frames, time_info, status):
             if status:
                 pass # Can log status
-            q.put(indata.copy())
+            try:
+                q.put_nowait(indata.copy())
+            except queue.Full:
+                pass
 
         audio_data = []
         speech_started = False
@@ -115,7 +126,8 @@ class VoiceService:
             import time
             with sd.InputStream(samplerate=sample_rate, channels=1, dtype='int16', blocksize=frames_per_buffer, callback=callback):
                 last_frame_time = time.monotonic()
-                while not self._cancel_flag and total_frames < max_frames:
+                deadline = last_frame_time + self.max_record_seconds + 1
+                while not self._cancel_flag and total_frames < max_frames and time.monotonic() < deadline:
                     try:
                         chunk = q.get(timeout=0.2)
                     except queue.Empty:
@@ -162,6 +174,8 @@ class VoiceService:
                 output.writeframes(recording.tobytes())
                 
             model = self._get_or_load_model()
+            if self._cancel_flag:
+                return ""
             
             try:
                 segments = list(model.transcribe(
@@ -186,7 +200,7 @@ class VoiceService:
                     initial_prompt=self.COMMAND_PROMPT,
                 )[0])
                 
-            return " ".join(segment.text.strip() for segment in segments).strip()
+            return "" if self._cancel_flag else " ".join(segment.text.strip() for segment in segments).strip()
         finally:
             wav_path.unlink(missing_ok=True)
 

@@ -65,16 +65,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--once", help="Run one text command and exit")
     parser.add_argument("--voice", action="store_true", help="Use push-to-talk voice mode")
     parser.add_argument("--gui", action="store_true", help="Open the Aeris desktop interface")
-    parser.add_argument("--live", action="store_true", help="Execute actions instead of dry-run simulation")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--live", dest="dry_run", action="store_false", help="Explicitly execute real actions")
+    mode.add_argument("--simulate", dest="dry_run", action="store_true", help="Explicitly simulate actions")
+    parser.set_defaults(dry_run=None)
     parser.add_argument("--no-ai", action="store_true", help="Disable Gemini planning")
-    parser.add_argument("--self-test", action="store_true", help="Run self-diagnostics and tests")
+    parser.add_argument("--self-test", action="store_true", help="Run offline capability diagnostics (no devices or network)")
     return parser
 
 
 def _assistant_from_args(args: argparse.Namespace) -> AerisAssistant:
     loaded = AerisConfig.load()
     config = loaded.with_overrides(
-        dry_run=not args.live,
+        dry_run=loaded.dry_run if args.dry_run is None else args.dry_run,
         ai_enabled=loaded.ai_enabled and not args.no_ai,
     )
     return AerisAssistant(config)
@@ -111,6 +114,7 @@ def voice_loop(assistant: AerisAssistant) -> int:
             return 0
         print(f"Listening for {assistant.config.voice_record_seconds} seconds...")
         try:
+            voice.begin_session()
             text = voice.listen_once()
         except VoiceUnavailableError as exc:
             print(f"Voice unavailable: {exc}")
@@ -131,23 +135,18 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     
     if args.self_test:
-        print("Running self-test diagnostics...")
-        import subprocess
-        try:
-            res = subprocess.run([sys.executable, "-m", "pytest"], capture_output=True, text=True)
-            print(res.stdout)
-            if res.returncode != 0:
-                print("Self-test FAILED.")
-                if res.stderr:
-                    print(res.stderr)
-                return res.returncode
-            print("Self-test PASSED.")
-            return 0
-        except Exception as e:
-            print(f"Self-test execution failed: {e}")
-            return 1
+        from .diagnostics import run_diagnostics
+        return run_diagnostics()
 
-    assistant = _assistant_from_args(args)
+    try:
+        assistant = _assistant_from_args(args)
+    except Exception:
+        message = "Aeris startup failed before the window opened. Check settings format, trusted paths and credential-store availability. No secrets are shown."
+        if args.gui and os.name == "nt":
+            ctypes.windll.user32.MessageBoxW(0, message, "Aeris Startup Error", 0x10)
+        if sys.stderr is not None:
+            print(message, file=sys.stderr)
+        return 1
     if args.gui:
         if not _acquire_gui_instance():
             if os.name == "nt":
@@ -158,10 +157,10 @@ def main(argv: list[str] | None = None) -> int:
             return launch_desktop(assistant)
         except Exception as e:
             if os.name == "nt":
-                import traceback
-                error_msg = f"Aeris crashed during startup:\n\n{traceback.format_exc()}"
+                error_msg = "Aeris GUI startup failed. Verify the PySide6/Windows extras and use offline --self-test diagnostics. Error details are withheld to protect credentials."
                 ctypes.windll.user32.MessageBoxW(0, error_msg, "Aeris Error", 0x10)
-            print(f"GUI Error: {e}")
+            if sys.stderr is not None:
+                print(f"GUI startup error: {type(e).__name__}", file=sys.stderr)
             return 1
     if args.once:
         turn = assistant.handle(args.once, approval_prompt)

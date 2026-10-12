@@ -42,11 +42,11 @@ _TEXT_EXTENSIONS = {
 
 class PathGuard:
     def __init__(self, allowed_roots: tuple[Path, ...]):
-        if not allowed_roots:
-            raise ValueError("At least one allowed path is required.")
         self.allowed_roots = tuple(path.expanduser().resolve() for path in allowed_roots)
 
     def resolve(self, value: str | Path) -> Path:
+        if not self.allowed_roots:
+            raise PermissionError("File access is disabled. Select trusted paths in settings.")
         raw = Path(os.path.expandvars(str(value))).expanduser()
         candidate = raw.resolve() if raw.is_absolute() else (self.allowed_roots[0] / raw).resolve()
         if not any(candidate == root or candidate.is_relative_to(root) for root in self.allowed_roots):

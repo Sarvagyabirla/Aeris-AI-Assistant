@@ -21,10 +21,11 @@ call .venv\Scripts\activate.bat
 echo.
 echo Installing PyInstaller...
 pip install pyinstaller
+if errorlevel 1 exit /b 1
 
 echo.
 echo Running pre-build self tests...
-python aeris\__main__.py --self-test
+python -m aeris --self-test
 if errorlevel 1 (
     echo.
     echo Self-tests failed. Aborting build.
@@ -34,7 +35,9 @@ if errorlevel 1 (
 
 echo.
 echo Building Aeris...
-pyinstaller --noconfirm --onedir --windowed --name "Aeris" --add-data "config;config" --hidden-import "plyer.platforms.win.notification" --hidden-import "plyer.platforms.win.storagepath" --hidden-import "googleapiclient" --hidden-import "sounddevice" --hidden-import "speech_recognition" --hidden-import "keyring.backends.Windows" aeris\__main__.py
+python -m pytest
+if errorlevel 1 exit /b 1
+pyinstaller --noconfirm --onedir --windowed --name "Aeris" --add-data "config;config" --hidden-import "keyring.backends.Windows" run_aeris.py
 
 if errorlevel 1 (
     echo.

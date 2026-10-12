@@ -65,7 +65,7 @@ def test_network_failure_becomes_offline_message(tmp_path):
             raise socket.gaierror(11001, "getaddrinfo failed")
 
     assistant._gemini = OfflinePlanner()
-    turn = assistant.handle("an online-only request")
+    turn = assistant.handle("an online-only request", lambda *_: True)
     assert "Internet is unavailable" in turn.reply
     assert "getaddrinfo" not in turn.reply
 

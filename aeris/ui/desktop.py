@@ -4,7 +4,7 @@ import threading
 import uuid
 from typing import Any
 
-from PySide6.QtCore import QThread, Signal, Slot
+from PySide6.QtCore import QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..activation import extract_addressed_command
 from ..assistant import AerisAssistant
 from ..integrations.voice import VoiceService, VoiceUnavailableError
 from ..models import ActionRequest, PermissionLevel
@@ -29,12 +30,15 @@ from ..state import CancellationToken, CancelledError, app_store
 
 
 class HandsFreeWorker(QThread):
+    transcript = Signal(str)
+    readiness = Signal(str)
     def __init__(self, assistant: AerisAssistant, assistant_worker: 'AssistantWorker', parent: QWidget | None = None):
         super().__init__(parent)
         self.assistant = assistant
         self.assistant_worker = assistant_worker
         self._stop_event = threading.Event()
         self.voice = None
+        self.push_to_talk = threading.Event()
 
     def stop(self):
         self._stop_event.set()
@@ -42,9 +46,6 @@ class HandsFreeWorker(QThread):
             self.voice._cancel_flag = True
 
     def run(self):
-        if not self.assistant.config.hands_free:
-            return
-            
         try:
             self.voice = VoiceService(
                 self.assistant.config.voice_model,
@@ -56,29 +57,34 @@ class HandsFreeWorker(QThread):
             return
 
         wake_word = self.assistant.config.wake_word.lower()
+        self.readiness.emit("Speech model not loaded; loaded on first voice use")
         
         while not self._stop_event.is_set():
-            if self.assistant_worker.current_token is not None:
-                self._stop_event.wait(timeout=1.0)
+            from ..core.tts_worker import global_tts
+            if self.assistant_worker.current_token is not None or global_tts.speaking.is_set():
+                self._stop_event.wait(timeout=0.1)
                 continue
+            addressed = self.push_to_talk.is_set()
+            if not self.assistant.config.hands_free and not addressed:
+                self._stop_event.wait(0.1)
+                continue
+            self.push_to_talk.clear()
                 
             try:
+                self.voice.begin_session()
+                self.readiness.emit("Listening (push-to-talk)" if addressed else "Wake standby — microphone recording")
                 text = self.voice.listen_once()
                 if not text or self._stop_event.is_set():
                     continue
                     
-                text_lower = text.lower()
-                if wake_word in text_lower:
-                    if text_lower.startswith(wake_word):
-                        command = text[len(wake_word):].strip()
-                        if command and command[0] in ".,!?:;":
-                            command = command[1:].strip()
-                    else:
-                        command = text
-                        
-                    if command:
-                        self.assistant_worker.process_command(command)
-            except VoiceUnavailableError:
+                command = text if addressed else extract_addressed_command(text, (wake_word,))
+                if command:
+                    self.transcript.emit(text)
+                    if not self.assistant_worker.process_command(command):
+                        self.readiness.emit("Busy — voice command not queued. Retry or press Stop.")
+                self.readiness.emit("Speech model: " + self.voice._model_state)
+            except VoiceUnavailableError as exc:
+                self.readiness.emit(str(exc) + " — use text input; toggle listening to retry.")
                 break
             except Exception:
                 self._stop_event.wait(timeout=2.0)
@@ -99,12 +105,17 @@ class AssistantWorker(QThread):
         self._permission_result: bool | None = None
         self._permission_event = threading.Event()
         self._stop_event = threading.Event()
+        self._generation = 0
+        self._pending_request_id = None
 
     def process_command(self, text: str) -> bool:
         """Returns True if accepted, False if busy."""
         command_id = str(uuid.uuid4())
         try:
-            self.command_queue.put_nowait((command_id, text))
+            with self._lock:
+                if self._stop_event.is_set():
+                    return False
+                self.command_queue.put_nowait((command_id, text, self._generation))
             return True
         except queue.Full:
             return False
@@ -112,6 +123,7 @@ class AssistantWorker(QThread):
     def cancel_current(self) -> None:
         """Interrupts the currently running command."""
         with self._lock:
+            self._generation += 1
             if self.current_token:
                 self.current_token.cancel()
         self._permission_result = False
@@ -122,6 +134,8 @@ class AssistantWorker(QThread):
         
         # Signal any screen monitor to stop
         app_store.set("monitor_cancelled", True)
+        app_store.set("kill_switch_active", True)
+        self.status_updated.emit("Cancellation requested — cleaning up")
 
         # Clear any pending commands
         try:
@@ -133,18 +147,20 @@ class AssistantWorker(QThread):
         self._stop_event.set()
         self.cancel_current()
         try:
-            self.command_queue.put_nowait(("stop", ""))
+            self.command_queue.put_nowait(("stop", "", self._generation))
         except queue.Full:
             pass
 
-    def provide_permission(self, allowed: bool) -> None:
+    def provide_permission(self, allowed: bool, request_id=None) -> None:
+        if request_id != self._pending_request_id or not self.current_token or self.current_token.is_cancelled:
+            return
         self._permission_result = allowed
         self._permission_event.set()
 
     def run(self) -> None:
         while not self._stop_event.is_set():
             try:
-                cmd_id, text = self.command_queue.get(timeout=0.5)
+                cmd_id, text, generation = self.command_queue.get(timeout=0.1)
             except queue.Empty:
                 continue
 
@@ -152,10 +168,12 @@ class AssistantWorker(QThread):
                 break
                 
             # Clear monitor cancelled flag for new commands
-            app_store.set("monitor_cancelled", False)
 
             token = CancellationToken()
+            token.command_id = cmd_id
             with self._lock:
+                if generation != self._generation:
+                    continue
                 self.current_token = token
 
             def approval_closure(request: ActionRequest, level: PermissionLevel, preview: str) -> bool:
@@ -163,6 +181,8 @@ class AssistantWorker(QThread):
                     return False
                 self._permission_event.clear()
                 self._permission_result = None
+                self._pending_request_id = request.request_id
+                self.status_updated.emit("Awaiting permission")
                 self.permission_requested.emit(request, level, preview)
                 
                 while not token.is_cancelled and not self._stop_event.is_set():
@@ -180,6 +200,8 @@ class AssistantWorker(QThread):
                     self.response_ready.emit(text, "Command cancelled.")
                 else:
                     self.response_ready.emit(text, turn.reply)
+                    from ..core.tts_worker import global_tts
+                    global_tts.speak(turn.reply.splitlines()[0][:300], token=token)
             except CancelledError:
                 self.response_ready.emit(text, "Command cancelled.")
             except Exception as e:
@@ -187,6 +209,7 @@ class AssistantWorker(QThread):
             finally:
                 with self._lock:
                     self.current_token = None
+                    self._pending_request_id = None
                 self.status_updated.emit("Ready")
 
 
@@ -303,17 +326,19 @@ class SettingsTab(QWidget):
         
     @Slot()
     def save_settings(self) -> None:
-        self.assistant.config.ai_enabled = self.ai_enabled.isChecked()
-        self.assistant.config.dry_run = self.dry_run.isChecked()
-        self.assistant.config.hands_free = self.hands_free.isChecked()
-        self.assistant.config.require_signed_installers = self.require_signed.isChecked()
-        self.assistant.config.gemini_api_key = self.api_key.text().strip() or None
-        self.assistant.config.wake_word = self.wake_word.text().strip() or "aeris"
+        config = self.assistant.config.with_overrides(
+            ai_enabled=self.ai_enabled.isChecked(), dry_run=self.dry_run.isChecked(),
+            hands_free=self.hands_free.isChecked(), require_signed_installers=self.require_signed.isChecked(),
+            gemini_api_key=self.api_key.text().strip() or None, wake_word=self.wake_word.text().strip() or "aeris")
         
         try:
-            self.assistant.config.save()
+            self.assistant.apply_settings(config)
+            window = self.window()
+            if isinstance(window, AerisMainWindow):
+                window.restart_voice()
+                window.mode_label.setText("SIMULATION — no PC changes" if config.dry_run else "LIVE — real PC actions")
             from PySide6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Settings Saved", "Settings have been saved successfully.")
+            QMessageBox.information(self, "Settings Saved", "Executor/provider settings applied. Voice restarts after capture cleanup.")
         except Exception as e:
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Error", f"Failed to save settings: {e}")
@@ -359,23 +384,46 @@ class AerisMainWindow(QMainWindow):
         self.worker = AssistantWorker(assistant, self)
         self.worker.start()
         self.hands_free = HandsFreeWorker(assistant, self.worker, self)
-        self.hands_free.start()
         
         self.setWindowTitle("Aeris Assistant")
         self.resize(800, 600)
         self.setup_ui()
         self.setup_styling()
+        self.hands_free.transcript.connect(lambda text: self.dashboard.chat_history.addItem("Heard: " + text))
+        self.hands_free.readiness.connect(self.voice_label.setText)
+        self.hands_free.start()
         
     def closeEvent(self, event: Any) -> None:
         app_store.set("kill_switch_active", True)
         if hasattr(self, 'hands_free'):
             self.hands_free.stop()
-            self.hands_free.quit()
-            self.hands_free.wait(2000)
         self.worker.stop_worker()
-        self.worker.quit()
-        self.worker.wait(2000)
+        from ..core.tts_worker import global_tts
+        global_tts.shutdown()
+        if self.hands_free.isRunning() or self.worker.isRunning():
+            event.ignore()
+            self.dashboard.update_status("Closing — waiting for owned workers to finish")
+            QTimer.singleShot(100, self.close)
+            return
+        if not self.assistant.close():
+            event.ignore()
+            QTimer.singleShot(100, self.close)
+            return
+        self.hands_free.wait(1000)
+        self.worker.wait(1000)
         super().closeEvent(event)
+
+    def restart_voice(self):
+        self.hands_free.stop()
+        def restart():
+            if self.hands_free.isRunning():
+                QTimer.singleShot(100, restart)
+                return
+            self.hands_free = HandsFreeWorker(self.assistant, self.worker, self)
+            self.hands_free.transcript.connect(lambda text: self.dashboard.chat_history.addItem("Heard: " + text))
+            self.hands_free.readiness.connect(self.voice_label.setText)
+            self.hands_free.start()
+        restart()
         
     def setup_ui(self) -> None:
         self.tabs = QTabWidget()
@@ -388,6 +436,27 @@ class AerisMainWindow(QMainWindow):
         self.tabs.addTab(self.dashboard, "Dashboard")
         self.tabs.addTab(self.apps, "Apps & Automation")
         self.tabs.addTab(self.settings, "Settings")
+        self.mode_label = QLabel("SIMULATION — no PC changes" if self.assistant.registry.dry_run else "LIVE — real PC actions")
+        self.voice_label = QLabel("Microphone muted until listening is enabled or push-to-talk is pressed")
+        self.dashboard.layout().insertWidget(0, self.mode_label)
+        self.dashboard.layout().insertWidget(1, self.voice_label)
+        voice_controls = QHBoxLayout()
+        ptt = QPushButton("Push to talk")
+        def push_to_talk():
+            if not self.hands_free.isRunning():
+                self.restart_voice()
+            self.hands_free.push_to_talk.set()
+        ptt.clicked.connect(push_to_talk)
+        speech_mute = QCheckBox("Mute speech")
+        from ..core.tts_worker import global_tts
+        speech_mute.toggled.connect(lambda muted: setattr(global_tts, "muted", muted))
+        mic_mute = QPushButton("Mute microphone")
+        mic_mute.clicked.connect(lambda: self.hands_free.stop())
+        voice_controls.addWidget(ptt)
+        voice_controls.addWidget(mic_mute)
+        voice_controls.addWidget(speech_mute)
+        self.dashboard.layout().addLayout(voice_controls)
+        self.dashboard.stop_btn.clicked.connect(lambda: self.hands_free.voice.cancel_recording() if self.hands_free.voice else None)
         
         # Connect permission request
         self.worker.permission_requested.connect(self.handle_permission)
@@ -460,7 +529,7 @@ class AerisMainWindow(QMainWindow):
         # In a real app, you might want custom dialogs for emails vs downloads.
         # This uses a simple Yes/No.
         ret = msg.exec()
-        self.worker.provide_permission(ret == QMessageBox.Yes)
+        self.worker.provide_permission(ret == QMessageBox.Yes, request.request_id)
 
 
 def launch_desktop(assistant: AerisAssistant) -> int:

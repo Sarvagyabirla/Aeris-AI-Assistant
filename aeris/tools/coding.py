@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import time
 import tomllib
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -277,7 +279,7 @@ Rules:
             
         return self.guard.resolve(target)
 
-    def search_workspace(self, arguments: dict[str, object]) -> ActionResult:
+    def search_workspace(self, arguments: dict[str, object], token=None) -> ActionResult:
         query = str(arguments["query"]).strip()
         if not query:
             return ActionResult(False, "Query cannot be empty.", error="empty_query")
@@ -287,25 +289,49 @@ Rules:
         if not workspace.exists():
             return ActionResult(False, "Workspace does not exist.", error="workspace_not_found")
             
-        for path in workspace.rglob("*"):
-            if path.is_file() and path.suffix.lower() in _ALLOWED_SUFFIXES:
-                try:
-                    content = path.read_text(encoding="utf-8", errors="ignore")
-                    if query in content:
-                        # Extract snippet
-                        idx = content.find(query)
-                        start = max(0, idx - 40)
-                        end = min(len(content), idx + len(query) + 40)
-                        snippet = content[start:end].replace('\n', ' ')
-                        matches.append(f"{path.relative_to(workspace)}: ...{snippet}...")
-                        if len(matches) >= 30:
-                            break
-                except OSError:
+        deadline = time.monotonic() + 5
+        scanned = 0
+        total_bytes = 0
+        truncated = False
+        ignored = {".git", ".venv", "venv", "node_modules", "__pycache__", "dist", "build", ".cache"}
+        for root, dirs, names in os.walk(workspace, followlinks=False):
+            dirs[:] = [name for name in dirs if name not in ignored and not (Path(root) / name).is_symlink()]
+            for name in names:
+                if token:
+                    token.raise_if_cancelled()
+                path = Path(root) / name
+                if time.monotonic() >= deadline or scanned >= 1000 or total_bytes >= 10_000_000:
+                    truncated = True
+                    break
+                if name.startswith(".env") or any(word in name.lower() for word in ("credential", "secret", "token", "password")):
                     continue
-                    
-        return ActionResult(True, f"Found {len(matches)} matches.", data={"matches": matches})
+                try:
+                    path = self._resolve_in_workspace(str(path.relative_to(workspace)))
+                    if not path.is_file() or path.suffix.lower() not in _ALLOWED_SUFFIXES:
+                        continue
+                    size = path.stat().st_size
+                    if size > 512_000:
+                        continue
+                    scanned += 1
+                    total_bytes += size
+                    with path.open("rb") as handle:
+                        content = handle.read(min(512_000, 10_000_000 - total_bytes + size)).decode("utf-8", errors="replace")
+                    if query in content:
+                        idx = content.find(query)
+                        line = content[:idx].count("\n") + 1
+                        snippet = content[max(0, idx - 40):idx + len(query) + 40].replace("\n", " ")
+                        matches.append(f"{path.relative_to(workspace)}:{line}: ...{snippet}...")
+                        if len(matches) >= 30:
+                            truncated = True
+                            break
+                except (OSError, ValueError):
+                    continue
+            if truncated:
+                break
+        return ActionResult(True, f"Found {len(matches)} matches." + (" Search limit reached." if truncated else ""),
+                            data={"matches": matches, "truncated": truncated, "scanned_files": scanned})
 
-    def apply_diff(self, arguments: dict[str, object]) -> ActionResult:
+    def apply_diff(self, arguments: dict[str, object], token=None) -> ActionResult:
         path_str = str(arguments["path"])
         old_content = str(arguments["old_content"])
         new_content = str(arguments["new_content"])
@@ -322,15 +348,34 @@ Rules:
             return ActionResult(False, "File type not allowed.", error="unsupported_file_type")
             
         try:
-            current = target.read_text(encoding="utf-8")
+            original = target.read_bytes()
+            expected = arguments.get("expected_sha256")
+            if not expected or hashlib.sha256(original).hexdigest() != expected:
+                return ActionResult(False, "Expected file hash is required and must match the preview.", error="stale_patch")
+            current = original.decode("utf-8")
             old_norm = old_content.replace("\r\n", "\n")
             curr_norm = current.replace("\r\n", "\n")
             
-            if old_norm not in curr_norm:
-                return ActionResult(False, "Old content block not found exactly in the file.", error="patch_failed")
+            if not old_norm or curr_norm.count(old_norm) != 1:
+                return ActionResult(False, "Old content must be nonempty and match exactly once.", error="patch_failed")
                 
             updated = curr_norm.replace(old_norm, new_content.replace("\r\n", "\n"), 1)
-            target.write_text(updated, encoding="utf-8")
-            return ActionResult(True, f"Applied diff to {target.name}", data={"path": str(target)})
+            newline = "\r\n" if b"\r\n" in original else "\n"
+            updated_bytes = updated.replace("\n", newline).encode("utf-8")
+            fd, temporary = tempfile.mkstemp(dir=target.parent, prefix=".aeris-patch-")
+            try:
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(updated_bytes)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                if token:
+                    token.raise_if_cancelled()
+                target = self._resolve_in_workspace(path_str)
+                if target.read_bytes() != original:
+                    return ActionResult(False, "File changed after preview.", error="stale_patch")
+                os.replace(temporary, target)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
+            return ActionResult(True, f"Applied diff to {target.name}", data={"path": str(target), "sha256": hashlib.sha256(updated_bytes).hexdigest()})
         except Exception as e:
             return ActionResult(False, f"Failed to apply diff: {e}", error="patch_error")

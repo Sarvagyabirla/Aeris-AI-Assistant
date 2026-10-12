@@ -1,3 +1,10 @@
+# Verification notice — 12 October 2026
+
+This older design map is not proof of implemented features. The current authoritative
+matrix is `CAPABILITY_MATRIX.md`; see `VALIDATION_REPORT.md` for fixture versus device evidence.
+Animated presence, reminders, Daily Brief retrieval, companion/tray and full screen workflows
+must not be inferred as complete from this document.
+
 # Aeris and the practical Jarvis capability map
 
 JARVIS in the Iron Man stories is fictional and has unrestricted access to advanced hardware, global data, robotics, weapons, and Stark infrastructure. Aeris translates the useful assistant ideas into capabilities that can work on a normal Windows laptop without pretending those fictional systems exist.

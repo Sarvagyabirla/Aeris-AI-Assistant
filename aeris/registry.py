@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 import pydantic
@@ -103,13 +103,22 @@ class ToolRegistry:
             try:
                 # Runtime validation of arguments using Pydantic
                 validated = spec.model.model_validate(request.arguments)
-                arguments = validated.model_dump()
+                arguments = validated.model_dump(mode="json", exclude_none=True)
             except pydantic.ValidationError as e:
-                result = ActionResult(False, f"Invalid arguments for {request.tool}: {e}", error="invalid_arguments")
+                fields = ", ".join(".".join(str(part) for part in item["loc"]) for item in e.errors())
+                result = ActionResult(False, f"Invalid arguments for {request.tool}: {fields}", error="invalid_arguments")
                 self.audit.write("tool_rejected", request=self._audit_request(request), reason=result.error)
                 return result
 
+        request = replace(request, arguments=dict(arguments))
+        approved_fingerprint = request.fingerprint()
+        if token:
+            token.raise_if_cancelled()
         decision = self.permissions.authorize(request, spec.permission, approval_callback)
+        if token:
+            token.raise_if_cancelled()
+        if request.fingerprint() != approved_fingerprint:
+            return ActionResult(False, "Action target or content changed during approval; request a fresh preview.", error="approval_changed")
         if not decision.allowed:
             result = ActionResult(False, decision.reason, error="permission_denied")
             self.audit.write(
@@ -127,6 +136,8 @@ class ToolRegistry:
         try:
             if token:
                 token.raise_if_cancelled()
+            if self.permissions.stopped and request.tool not in never_simulate:
+                return ActionResult(False, "Aeris stopped before execution.", error="kill_switch")
             sig = inspect.signature(spec.handler)
             if "token" in sig.parameters:
                 result = spec.handler(dict(arguments), token=token)

@@ -4,12 +4,14 @@ import ipaddress
 import os
 import socket
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from ..models import ActionResult
+from ..state import CancelledError
 
 _INSTALLER_EXTENSIONS = {".appx", ".exe", ".msi", ".msix", ".msixbundle"}
 _INVALID_FILENAME_CHARS = '<>:"/\\|?*'
@@ -119,10 +121,12 @@ class DownloadTools:
             return "could_not_complete"
         return "completed" if scan.returncode == 0 else "attention_required"
 
-    def download(self, arguments: dict[str, object]) -> ActionResult:
+    def download(self, arguments: dict[str, object], token=None) -> ActionResult:
+        if token:
+            token.raise_if_cancelled()
         try:
             url = self._validate_url(str(arguments["url"]), resolve_host=True)
-            requested_name = str(arguments.get("filename", "")).strip()
+            requested_name = str(arguments.get("filename") or "").strip()
             parsed_name = Path(urlparse(url).path).name or "download"
             destination = self._destination_for(requested_name or parsed_name)
         except socket.gaierror:
@@ -139,6 +143,9 @@ class DownloadTools:
         opener = urllib.request.build_opener(_SafeRedirectHandler(self._validate_url))
 
         try:
+            deadline = time.monotonic() + 300
+            if token:
+                token.raise_if_cancelled()
             with opener.open(request, timeout=45) as response:
                 final_url = self._validate_url(response.geturl())
                 content_length = response.headers.get("Content-Length")
@@ -157,17 +164,28 @@ class DownloadTools:
                 received = 0
                 with partial.open("xb") as handle:
                     while chunk := response.read(1024 * 1024):
+                        if token:
+                            token.raise_if_cancelled()
+                        if time.monotonic() >= deadline:
+                            raise ValueError("Download exceeded its total time limit")
                         received += len(chunk)
                         if received > self.max_bytes:
                             raise ValueError(
                                 f"Download exceeded the {self.max_bytes // (1024 * 1024)} MB safety limit."
                             )
                         handle.write(chunk)
+                if token:
+                    token.raise_if_cancelled()
                 partial.replace(destination)
+        except CancelledError:
+            partial.unlink(missing_ok=True)
+            raise
         except (OSError, ValueError, urllib.error.URLError) as exc:
             partial.unlink(missing_ok=True)
             return ActionResult(False, f"Download failed safely: {exc}", error="download_failed")
 
+        if token:
+            token.raise_if_cancelled()
         scan_status = self._defender_scan(destination)
         installer_note = (
             " It was not executed; use 'install downloaded installer <path>' after reviewing it."

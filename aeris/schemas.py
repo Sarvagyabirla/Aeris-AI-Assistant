@@ -4,7 +4,7 @@ import pydantic
 
 
 class AerisBaseModel(pydantic.BaseModel):
-    model_config = pydantic.ConfigDict(extra="forbid")
+    model_config = pydantic.ConfigDict(extra="forbid", strict=True)
 
 class OpenApp(AerisBaseModel):
     name: str = pydantic.Field(description="The name of the application to open, e.g., 'chrome', 'notepad'")
@@ -16,13 +16,13 @@ class SetVolume(AerisBaseModel):
     level: int = pydantic.Field(description="Volume level from 0 to 100", ge=0, le=100)
 
 class ChangeVolume(AerisBaseModel):
-    delta: int = pydantic.Field(description="Amount to change the volume by (e.g. 10 or -10)")
+    delta: int = pydantic.Field(description="Amount to change the volume by (e.g. 10 or -10)", ge=-100, le=100)
 
 class SetBrightness(AerisBaseModel):
     level: int = pydantic.Field(description="Brightness level from 0 to 100", ge=0, le=100)
 
 class ChangeBrightness(AerisBaseModel):
-    delta: int = pydantic.Field(description="Amount to change the brightness by (e.g. 10 or -10)")
+    delta: int = pydantic.Field(description="Amount to change the brightness by (e.g. 10 or -10)", ge=-100, le=100)
 
 class MediaControl(AerisBaseModel):
     action: Literal["play_pause", "next", "previous", "stop", "mute"] = pydantic.Field(description="The media action to perform")
@@ -38,17 +38,19 @@ class WindowAction(AerisBaseModel):
 
 class InspectScreen(AerisBaseModel):
     question: str = pydantic.Field(description="A question or prompt about the current screen")
+    region: tuple[int, int, int, int] | None = pydantic.Field(None, description="Explicit approved screen rectangle (left, top, right, bottom); required for live capture")
 
 class MonitorScreen(AerisBaseModel):
-    duration_minutes: int = pydantic.Field(description="How long to monitor the screen in minutes")
+    duration_minutes: int = pydantic.Field(description="How long to monitor the screen in minutes", ge=1, le=30)
     event_query: str = pydantic.Field(description="What specific event to look for on the screen")
 
 class SearchWorkspace(AerisBaseModel):
     query: str = pydantic.Field(description="The exact text string to search for across all files in the workspace")
 
 class ApplyDiff(AerisBaseModel):
+    expected_sha256: str = pydantic.Field(pattern=r"^[0-9a-f]{64}$", description="SHA256 of the exact file bytes reviewed before approval")
     path: str = pydantic.Field(description="The relative path to the file inside the workspace")
-    old_content: str = pydantic.Field(description="The exact old content block to replace")
+    old_content: str = pydantic.Field(description="The exact old content block to replace", min_length=1)
     new_content: str = pydantic.Field(description="The new content block to insert")
 
 class CreateProject(AerisBaseModel):
@@ -58,9 +60,11 @@ class OpenUrl(AerisBaseModel):
     url: pydantic.HttpUrl = pydantic.Field(description="The HTTP or HTTPS URL to open")
 
 class BrowserClick(AerisBaseModel):
+    expected_url: pydantic.HttpUrl = pydantic.Field(description="Exact page URL observed and approved for this action")
     selector: str = pydantic.Field(description="CSS selector of the element to click")
 
 class BrowserFill(AerisBaseModel):
+    expected_url: pydantic.HttpUrl = pydantic.Field(description="Exact page URL observed and approved for this action")
     selector: str = pydantic.Field(description="CSS selector of the input field to fill")
     text: str = pydantic.Field(description="The text to type into the field")
 
@@ -101,9 +105,9 @@ class ListRecentEmails(AerisBaseModel):
     count: int = pydantic.Field(5, description="Number of emails to list", ge=1, le=20)
 
 class SendEmail(AerisBaseModel):
-    to: str = pydantic.Field(description="The recipient email address")
+    to: str = pydantic.Field(description="The recipient email address", max_length=254, pattern=r"^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$")
     subject: str = pydantic.Field(description="The email subject line")
     body: str = pydantic.Field(description="The email body text")
 
 class ListCalendarEvents(AerisBaseModel):
-    count: int = pydantic.Field(10, description="The maximum number of upcoming events to retrieve")
+    count: int = pydantic.Field(10, description="The maximum number of upcoming events to retrieve", ge=1, le=50)

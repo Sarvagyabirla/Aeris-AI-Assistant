@@ -4,7 +4,8 @@ import socket
 import time
 from typing import Any
 
-from ..models import ActionRequest, PlannedResponse
+from ..models import PlannedResponse
+from .planning import parse_plan, select_tools
 
 
 class GeminiPlanner:
@@ -20,41 +21,7 @@ class GeminiPlanner:
             self.logger.error(f"Failed to initialize Gemini client: {e}")
 
     def _select_relevant_tools(self, user_text: str, tool_definitions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        # Fast keyword-based pre-filtering to reduce token count and latency
-        text = user_text.lower()
-        selected = []
-        for tool in tool_definitions:
-            name = tool["name"].lower()
-            # If it's a core system tool or very basic, keep it. 
-            if name.startswith("system."):
-                selected.append(tool)
-                continue
-                
-            # Basic keyword mapping based on prefixes
-            if name.startswith("desktop.") and any(kw in text for kw in ("open", "close", "volume", "brightness", "play", "pause", "type", "screenshot", "clipboard", "window")):
-                selected.append(tool)
-            elif name.startswith("browser.") and any(kw in text for kw in ("open", "search", "youtube", "google", "browser", "web")):
-                selected.append(tool)
-            elif name.startswith("files.") and any(kw in text for kw in ("file", "folder", "note", "read", "write", "copy", "move", "delete", "create", "list", "find")):
-                selected.append(tool)
-            elif name.startswith("packages.") and any(kw in text for kw in ("install", "uninstall", "update", "app", "software", "winget")):
-                selected.append(tool)
-            elif name.startswith("email.") and any(kw in text for kw in ("email", "mail", "gmail", "send", "message", "read")):
-                selected.append(tool)
-            elif name.startswith("downloads.") and any(kw in text for kw in ("download", "get")):
-                selected.append(tool)
-            elif name.startswith("vision.") and any(kw in text for kw in ("look", "screen", "see", "read", "explain")):
-                selected.append(tool)
-            elif name.startswith("calendar.") and any(kw in text for kw in ("calendar", "event", "meeting", "schedule", "appointment")):
-                selected.append(tool)
-            elif name.startswith("coding.") and any(kw in text for kw in ("code", "program", "app", "project", "build")):
-                selected.append(tool)
-                
-        if not selected:
-            # Fallback to all if no clear category matched
-            return tool_definitions
-        return selected
-
+        return select_tools(user_text, tool_definitions)
     def plan(
         self,
         user_text: str,
@@ -134,22 +101,7 @@ USER REQUEST:
                     token.raise_if_cancelled()
                 payload = json.loads(response.text)
                 
-                actions: list[ActionRequest] = []
-                raw_actions = payload.get("actions", [])
-                
-                if not isinstance(raw_actions, list):
-                    raise ValueError("Planner actions must be a list.")
-                    
-                for item in raw_actions[:5]:
-                    if not isinstance(item, dict):
-                        continue
-                    name = item.get("tool")
-                    arguments = item.get("arguments", {})
-                    if name not in allowed_names or not isinstance(arguments, dict):
-                        continue
-                    actions.append(ActionRequest(tool=name, arguments=arguments, source_text=user_text))
-                    
-                return PlannedResponse(reply=str(payload.get("reply", "")).strip(), actions=actions)
+                return parse_plan(payload, allowed_names, user_text)
                 
             except (ConnectionError, TimeoutError, socket.gaierror):
                 if attempt == max_retries - 1:

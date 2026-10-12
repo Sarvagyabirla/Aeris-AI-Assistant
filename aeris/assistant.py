@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import socket
+import threading
+import uuid
 from typing import Any
 
 from . import schemas
@@ -17,6 +19,7 @@ from .models import ActionRequest, ActionResult, AssistantTurn, PermissionLevel,
 from .permissions import ApprovalCallback, PermissionEngine
 from .registry import ToolRegistry, ToolSpec
 from .router import LocalRouter
+from .timing import StageTimer
 from .tools import (
     BrowserAdvancedTools,
     BrowserTools,
@@ -32,6 +35,7 @@ from .tools import (
 class AerisAssistant:
     def __init__(self, config: AerisConfig | None = None):
         self.config = config or AerisConfig.load()
+        self._task_lock = threading.RLock()
         self.audit = AuditLogger(self.config.audit_log)
         self.memory = MemoryStore(self.config.memory_db)
         self.permissions = PermissionEngine()
@@ -49,6 +53,7 @@ class AerisAssistant:
         desktop = DesktopTools(self.config.app_catalog_file, self.config.data_dir / "screenshots")
         browser = BrowserTools(self.config.allowed_domains)
         browser_adv = BrowserAdvancedTools(self.config.allowed_domains)
+        self._browser = browser_adv
         files = FilesystemTools(self.config.allowed_paths)
         downloads = DownloadTools(
             self.config.download_dir,
@@ -289,14 +294,14 @@ class AerisAssistant:
             ToolSpec(
                 "browser.advanced_click",
                 "Click an element in the interactive playwright browser by CSS or text selector.",
-                PermissionLevel.AUTO,
+                PermissionLevel.CONFIRM,
                 browser_adv.click,
                 model=schemas.BrowserClick,
             ),
             ToolSpec(
                 "browser.advanced_fill",
                 "Fill a text field in the interactive playwright browser.",
-                PermissionLevel.AUTO,
+                PermissionLevel.CONFIRM,
                 browser_adv.fill,
                 model=schemas.BrowserFill,
             ),
@@ -452,7 +457,37 @@ class AerisAssistant:
         for spec in specs:
             self.registry.register(spec)
 
-    def handle(
+    def apply_settings(self, config: AerisConfig) -> None:
+        """Swap adapters only between tasks; callers must stop voice separately."""
+        config.validate()
+        if not self._task_lock.acquire(blocking=False):
+            raise RuntimeError("Aeris is busy. Stop or finish the task before applying settings.")
+        try:
+            if not self._browser.close():
+                raise RuntimeError("Browser cleanup is pending; settings were not applied.")
+            config.save()
+            self.config = config
+            self.permissions = PermissionEngine()
+            self.registry = ToolRegistry(self.permissions, self.audit, dry_run=config.dry_run)
+            self._gemini = GeminiPlanner(config.gemini_api_key, config.gemini_model) if config.ai_enabled and config.gemini_api_key else None
+            self._ollama = OllamaPlanner() if config.ai_enabled else None
+            self._register_tools()
+        finally:
+            self._task_lock.release()
+
+    def close(self) -> bool:
+        return self._browser.close()
+
+    def handle(self, text: str, approval_callback=None, token=None) -> AssistantTurn:
+        with self._task_lock:
+            self.last_timing = StageTimer(command_id=getattr(token, "command_id", uuid.uuid4().hex))
+            self.last_timing.start("task_total")
+            try:
+                return self._handle(text, approval_callback, token)
+            finally:
+                self.last_timing.end("task_total")
+
+    def _handle(
         self,
         text: str,
         approval_callback: ApprovalCallback | None = None,
@@ -463,12 +498,23 @@ class AerisAssistant:
         if token:
             token.raise_if_cancelled()
             
+        self.last_timing.start("routing")
         plan = self.router.route(user_text)
+        self.last_timing.end("routing")
         if plan is None and self._gemini is not None:
+            share_request = ActionRequest("privacy.share_request", {"text": user_text}, source_text=user_text)
+            if not approval_callback or not approval_callback(
+                share_request, PermissionLevel.CONFIRM,
+                "Share this request with the configured cloud planner?\n" + user_text[:2000] +
+                "\nOnly explicitly SHAREABLE history is included; no files or screenshots are attached.",
+            ):
+                return AssistantTurn(user_text, "Cloud sharing was not approved. Local commands remain available.")
+            if token:
+                token.raise_if_cancelled()
             try:
-                plan = self._gemini.plan(user_text, self.registry.definitions(), self.memory.recent(8, exclude_sensitive=True), token)
+                plan = self._gemini.plan(user_text, self.registry.definitions(), self.memory.provider_context(8), token)
             except Exception as exc:
-                self.audit.write("gemini_planner_failed", error=str(exc))
+                self.audit.write("gemini_planner_failed", error=type(exc).__name__)
                 if self._is_network_error(exc) and self._ollama is not None:
                     # Fallback to offline planner
                     try:
@@ -505,13 +551,18 @@ class AerisAssistant:
         for action in plan.actions:
             if token:
                 token.raise_if_cancelled()
+            self.last_timing.start("permission_and_tool_" + action.request_id)
             result = self.registry.execute(action, approval_callback, token=token)
+            self.last_timing.end("permission_and_tool_" + action.request_id)
             results.append(result)
             prefix = "[OK]" if result.success else "[FAILED]"
             lines.append(f"{prefix} {result.message}")
             details = self._visible_details(action, result)
             if details:
                 lines.append(details)
+            if not result.success:
+                lines.append("Remaining steps were not run because a required step failed.")
+                break
 
         reply = "\n".join(line for line in lines if line).strip() or "Done."
         self.memory.add("assistant", reply[:10_000], classification="SENSITIVE" if sensitive else "LOCAL_ONLY")
@@ -551,6 +602,15 @@ class AerisAssistant:
             return str(data["output"])
         if not result.success:
             return ""
+        if action.tool == "browser.advanced_extract":
+            return str(data.get("content", ""))[:5_000] or "No page text was returned."
+        if action.tool == "coding.search_workspace":
+            return "\n".join(str(item) for item in data.get("matches", [])) or "No matches found."
+        if action.tool == "calendar.list_events":
+            return "\n".join(
+                f"- {item.get('summary', '(Untitled)')} | {item.get('start', '')} | {item.get('end', '')}"
+                for item in data.get("events", [])
+            ) or "No upcoming events found."
         if action.tool == "files.find":
             return "\n".join(f"- {item}" for item in data.get("matches", []))
         if action.tool == "files.list":
