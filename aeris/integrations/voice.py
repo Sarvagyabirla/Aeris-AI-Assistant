@@ -103,6 +103,9 @@ class VoiceService:
         except ImportError as exc:
             raise VoiceUnavailableError("Voice packages are missing.") from exc
 
+        except OSError as exc:
+            raise VoiceUnavailableError("Audio native runtime unavailable. Repair PortAudio/sounddevice; text input remains available.") from exc
+
         sample_rate = 16_000
         q = queue.Queue(maxsize=80)
         

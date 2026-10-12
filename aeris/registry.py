@@ -126,6 +126,17 @@ class ToolRegistry:
             )
             return result
 
+        if request.tool == "coding.create_project" and not self.dry_run:
+            sharing = ActionRequest("privacy.share_coding", dict(arguments), source_text=request.source_text)
+            if not approval_callback or not approval_callback(sharing, PermissionLevel.CONFIRM,
+                "Send this coding request to configured Gemini for generation and at most one repair? "
+                "No existing project files are attached. Generated errors may be included in the repair.\n" + request.preview()):
+                return ActionResult(False, "Coding cloud sharing was not approved.", error="permission_denied")
+            if token:
+                token.raise_if_cancelled()
+            if self.permissions.stopped or request.fingerprint() != approved_fingerprint or sharing.arguments != arguments:
+                return ActionResult(False, "Coding scope changed or Aeris stopped; request fresh approval.", error="approval_changed")
+
         never_simulate = {"system.stop", "system.resume", "system.status"}
         if self.dry_run and request.tool not in never_simulate:
             result = ActionResult(True, f"Dry run: would execute {request.preview()}", dry_run=True)

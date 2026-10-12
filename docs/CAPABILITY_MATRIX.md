@@ -1,5 +1,12 @@
 # Capability/setup matrix — 12 October 2026
 
+Current additions: owned native command cancellation/output bounds and separate package-presence
+observation are fixture verified (not installation acceptance); async settings/shutdown use real Qt
+event-loop fixtures. Ephemeral `make it 40` applies only to a recent absolute volume/brightness task,
+expires after 30 seconds, and is fixture verified. Acoustic follow-up is not device tested.
+Installer hash/signer scope, version/publisher proof, DNS/socket interruption, Windows Job Object
+ownership, reminders/routines/screen selector and complete release remain incomplete.
+
 “Fixture verified” means no device/account success is asserted.
 
 | Capability | Actual status | Evidence/setup |
@@ -18,10 +25,10 @@
 | Screen watch | Unavailable pending safe scope UI | Full-desktop background upload disabled |
 | Coding search | Bounded offline implementation | Symlink privilege skip; Windows junction/race acceptance pending |
 | Coding patch | Single-file hash/unique-match guard fixture verified | UTF-8 only; no multi-file Undo/check workflow |
-| Conversation history | Local, migration/privacy fixture verified | Inspection/correction/export/retention APIs; no full memory UI |
+| Conversation history | Local, migration/privacy fixture verified | Connected bounded inspect/correct/forget UI; export/retention APIs only |
 | Reminders/routines/project continuity | Not implemented as connected workflows | No app-closed delivery promise |
 | Gmail/Calendar | Needs account setup | Existing adapters/renderers; designated account verification pending |
-| Daily Brief | Shortcut only, not finished retrieved workflow | Do not advertise as current authorized data aggregation |
+| Daily Brief | Connected bounded event/mail metadata retrieval, fixture verified | Local rendering, scoped registry permissions; no reminders, cloud summary or account acceptance |
 | Companion/animated core/tray/global shortcut | Not implemented | Existing native Qt dashboard, not holographic presence |
 | Packaged executable | Not built/verified | PyInstaller absent; entrypoint/build command repairs only |
 

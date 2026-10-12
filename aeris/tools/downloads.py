@@ -3,13 +3,13 @@ from __future__ import annotations
 import ipaddress
 import os
 import socket
-import subprocess
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from ..core.process_runner import run_owned
 from ..models import ActionResult
 from ..state import CancelledError
 
@@ -98,7 +98,9 @@ class DownloadTools:
         raise FileExistsError("Could not choose a unique download filename.")
 
     @staticmethod
-    def _defender_scan(path: Path) -> str:
+    def _defender_scan(path: Path, token=None) -> str:
+        if token and token.is_cancelled:
+            return "cancelled"
         if os.name != "nt":
             return "not_available"
         candidates = [Path(os.environ.get("ProgramFiles", "")) / "Windows Defender" / "MpCmdRun.exe"]
@@ -108,16 +110,10 @@ class DownloadTools:
         executable = next((item for item in candidates if item.is_file()), None)
         if executable is None:
             return "not_available"
-        try:
-            scan = subprocess.run(
-                [str(executable), "-Scan", "-ScanType", "3", "-File", str(path)],
-                capture_output=True,
-                text=True,
-                timeout=300,
-                check=False,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except (OSError, subprocess.TimeoutExpired):
+        scan = run_owned([str(executable), "-Scan", "-ScanType", "3", "-File", str(path)], timeout=300, token=token)
+        if scan.reason == "cancelled":
+            return "cancelled"
+        if scan.reason:
             return "could_not_complete"
         return "completed" if scan.returncode == 0 else "attention_required"
 
@@ -176,7 +172,10 @@ class DownloadTools:
                         handle.write(chunk)
                 if token:
                     token.raise_if_cancelled()
-                partial.replace(destination)
+                if token:
+                    token.commit(lambda: partial.rename(destination))
+                else:
+                    partial.rename(destination)
         except CancelledError:
             partial.unlink(missing_ok=True)
             raise
@@ -184,9 +183,13 @@ class DownloadTools:
             partial.unlink(missing_ok=True)
             return ActionResult(False, f"Download failed safely: {exc}", error="download_failed")
 
-        if token:
-            token.raise_if_cancelled()
-        scan_status = self._defender_scan(destination)
+        if token and token.is_cancelled:
+            return ActionResult(False, "Download published before cancellation; file remains, scan did not run.",
+                data={"path": str(destination), "published": True}, error="cancelled_after_publication")
+        scan_status = self._defender_scan(destination, token=token)
+        if scan_status == "cancelled":
+            return ActionResult(False, "Scan cancelled. Downloaded file remains; safety verification is incomplete.",
+                data={"path": str(destination), "published": True, "defender_scan": scan_status}, error="cancelled_after_publication")
         installer_note = (
             " It was not executed; use 'install downloaded installer <path>' after reviewing it."
             if destination.suffix.lower() in _INSTALLER_EXTENSIONS

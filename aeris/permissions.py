@@ -56,7 +56,8 @@ class AuthorizationDecision:
 class PermissionEngine:
     def __init__(self, approval_manager: ApprovalManager | None = None):
         self.approvals = approval_manager or ApprovalManager()
-        self._session_approvals: set[str] = set()
+        self._session_approvals: dict[str, float] = {}
+        self._generation = 0
         self._kill_switch = False
         self._lock = threading.Lock()
 
@@ -68,6 +69,8 @@ class PermissionEngine:
     def stop(self) -> None:
         with self._lock:
             self._kill_switch = True
+            self._generation += 1
+            self._session_approvals.clear()
             app_store.set("kill_switch_active", True)
 
     def resume(self) -> None:
@@ -76,7 +79,9 @@ class PermissionEngine:
             app_store.set("kill_switch_active", False)
 
     def clear_session(self) -> None:
-        self._session_approvals.clear()
+        with self._lock:
+            self._session_approvals.clear()
+            self._generation += 1
 
     def authorize(
         self,
@@ -99,15 +104,27 @@ class PermissionEngine:
             )
 
         if level is PermissionLevel.SESSION:
-            if request.tool in self._session_approvals:
-                return AuthorizationDecision(True, "Approved for this session.")
+            fingerprint = request.fingerprint()
+            with self._lock:
+                generation = self._generation
+                if self._session_approvals.get(fingerprint, 0) > time.monotonic():
+                    return AuthorizationDecision(True, "Approved for this exact scope until expiry.")
             if callback(request, level, request.preview()):
-                self._session_approvals.add(request.tool)
+                with self._lock:
+                    if self._kill_switch or generation != self._generation or request.fingerprint() != fingerprint:
+                        return AuthorizationDecision(False, "Approval invalidated; request a fresh scope.")
+                    self._session_approvals[fingerprint] = time.monotonic() + self.approvals.ttl_seconds
                 return AuthorizationDecision(True, "Session approval granted.")
             return AuthorizationDecision(False, "Session approval was denied.")
 
+        fingerprint = request.fingerprint()
+        with self._lock:
+            generation = self._generation
         if not callback(request, level, request.preview()):
             return AuthorizationDecision(False, "Action confirmation was denied.")
+        with self._lock:
+            if self._kill_switch or generation != self._generation or request.fingerprint() != fingerprint:
+                return AuthorizationDecision(False, "Confirmation invalidated; request a fresh preview.")
         token = self.approvals.issue(request)
         if not self.approvals.consume(token, request):
             return AuthorizationDecision(False, "The approval token was invalid or expired.")

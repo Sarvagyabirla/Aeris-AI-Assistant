@@ -1,3 +1,24 @@
+# Next supervised source-app checks (native/lifecycle increment)
+
+Open START_AERIS.bat in SIMULATION; type `set volume to 35`, then `make it 40` and verify simulated
+volume wording. After 31 seconds the same follow-up must ask which control. Try Emergency Stop,
+confirm a subsequent command is blocked, then explicitly `resume Aeris`. Task Stop is separate.
+Save simulation settings and close during harmless fixture work; confirm responsive status and
+no repeated worker restart. Do not install software, run generated code or test a sensitive window.
+Real winget/UAC/Defender and microphone/SAPI checks require separate explicit supervision.
+
+# Follow-on supervised acceptance — 12 October 2026
+
+Use `C:\AI Related project BY AI\AERIS_AI_ASSISTANT\Aeris\START_AERIS.bat`.
+Next safe check: launch in SIMULATION, type `open notepad`, confirm visible simulated outcome;
+inspect the Local memory tab using a deliberately non-private test sentence, correct then forget it.
+Do not enable LIVE or voice without intentional device consent. Daily Brief can be checked in
+SIMULATION without accounts/fetching; real retrieval requires designated accounts and approval.
+Supervise voice playback/Stop and close/reopen separately. Do not test installation, real mail,
+sensitive screen capture or generated host code merely to fill acceptance rows.
+No frozen executable is supplied; PyInstaller is absent. See the current validation scenario matrix
+and exact continuation checklist in IMPLEMENTATION_STATUS before broader live acceptance.
+
 # Windows manual test checklist
 
 Keep Aeris in dry-run mode for the first pass.

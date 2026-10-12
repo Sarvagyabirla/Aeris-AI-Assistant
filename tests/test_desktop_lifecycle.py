@@ -35,7 +35,7 @@ def test_real_window_text_dispatch_and_clean_close(tmp_path, monkeypatch):
     pump(app, lambda: window.dashboard.chat_history.count() >= 2)
     assert "SIMULATION" in window.mode_label.text()
     assert "Dry run" in window.dashboard.chat_history.item(1).text()
-    assert spoken and "Dry run" in spoken[0]
+    assert spoken and "Simulation only" in spoken[0]
     window.close()
     pump(app, lambda: not window.isVisible())
     assert not window.worker.isRunning()
@@ -74,3 +74,65 @@ def test_queue_full_visible_to_caller(tmp_path):
     assert not worker.process_command("second")
     worker.cancel_current()
     assert worker.command_queue.empty()
+
+
+def test_memory_view_inspects_and_forgets_only_selected_local_record(tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    from aeris.ui.memory_view import MemoryView
+    app = QApplication.instance() or QApplication([])
+    assistant = AerisAssistant(make_config(tmp_path))
+    assistant.memory.add("user", "fixture local memory", classification="LOCAL_ONLY")
+    view = MemoryView(assistant.memory)
+    view.refresh()
+    assert view.list.count() == 1
+    view.list.setCurrentRow(0)
+    monkeypatch.setattr(QMessageBox, "question", lambda *_: QMessageBox.Yes)
+    view.forget()
+    app.processEvents()
+    assert view.list.count() == 0
+    assert assistant.memory.inspect() == []
+
+
+def test_settings_apply_does_not_block_qt_event_loop(tmp_path, monkeypatch):
+    from aeris.ui.desktop import SettingsTab
+    app = QApplication.instance() or QApplication([])
+    assistant = AerisAssistant(make_config(tmp_path))
+    entered = threading.Event()
+    release = threading.Event()
+    def apply(config):
+        entered.set()
+        assert release.wait(3)
+    monkeypatch.setattr(assistant, "apply_settings", apply)
+    tab = SettingsTab(assistant)
+    tab.save_settings()
+    pump(app, entered.is_set)
+    assert not tab.save_btn.isEnabled()
+    assert tab.apply_worker.isRunning()
+    release.set()
+    pump(app, lambda: tab.save_btn.isEnabled() and not tab.apply_worker.isRunning())
+
+
+def test_close_cleanup_is_owned_once_off_gui_thread(tmp_path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    assistant = AerisAssistant(make_config(tmp_path))
+    entered = threading.Event()
+    release = threading.Event()
+    calls = []
+    def cleanup():
+        calls.append(threading.get_ident())
+        entered.set()
+        assert release.wait(3)
+        return True
+    monkeypatch.setattr(assistant, "close", cleanup)
+    monkeypatch.setattr(global_tts, "shutdown", lambda: True)
+    window = AerisMainWindow(assistant)
+    window.show()
+    window.close()
+    pump(app, entered.is_set)
+    window.close()
+    app.processEvents()
+    assert calls == [calls[0]] and calls[0] != threading.get_ident()
+    assert window.isVisible()
+    release.set()
+    pump(app, lambda: not window.isVisible())

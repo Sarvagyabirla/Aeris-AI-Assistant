@@ -27,6 +27,7 @@ from ..assistant import AerisAssistant
 from ..integrations.voice import VoiceService, VoiceUnavailableError
 from ..models import ActionRequest, PermissionLevel
 from ..state import CancellationToken, CancelledError, app_store
+from .memory_view import MemoryView
 
 
 class HandsFreeWorker(QThread):
@@ -134,7 +135,7 @@ class AssistantWorker(QThread):
         
         # Signal any screen monitor to stop
         app_store.set("monitor_cancelled", True)
-        app_store.set("kill_switch_active", True)
+        self.assistant.followup.clear()
         self.status_updated.emit("Cancellation requested — cleaning up")
 
         # Clear any pending commands
@@ -201,7 +202,7 @@ class AssistantWorker(QThread):
                 else:
                     self.response_ready.emit(text, turn.reply)
                     from ..core.tts_worker import global_tts
-                    global_tts.speak(turn.reply.splitlines()[0][:300], token=token)
+                    global_tts.speak(turn.spoken_summary(), token=token)
             except CancelledError:
                 self.response_ready.emit(text, "Command cancelled.")
             except Exception as e:
@@ -257,6 +258,14 @@ class DashboardTab(QWidget):
         input_layout.addWidget(self.input_field)
         input_layout.addWidget(self.send_btn)
         input_layout.addWidget(self.stop_btn)
+        emergency = QPushButton("Emergency Stop")
+        emergency.setToolTip("Blocks all tasks until explicit Resume; separate from cancelling this task")
+        def emergency_stop():
+            self.worker.assistant.permissions.stop()
+            self.worker.cancel_current()
+            self.update_status("Global Stop active — explicitly resume Aeris")
+        emergency.clicked.connect(emergency_stop)
+        input_layout.addWidget(emergency)
         layout.addLayout(input_layout)
 
         # Connect signals
@@ -289,11 +298,46 @@ class DashboardTab(QWidget):
         self.chat_history.scrollToBottom()
 
 
+class SettingsApplyWorker(QThread):
+    completed = Signal(bool, str)
+
+    def __init__(self, assistant, config, parent=None):
+        super().__init__(parent)
+        self.assistant = assistant
+        self.config = config
+
+    def run(self):
+        try:
+            self.assistant.apply_settings(self.config)
+        except Exception:
+            self.completed.emit(False, "Settings were not applied. Check credential storage, settings validity and adapter cleanup.")
+        else:
+            self.completed.emit(True, "Executor/provider settings applied.")
+
+
+class CleanupWorker(QThread):
+    def __init__(self, assistant, parent=None):
+        super().__init__(parent)
+        self.assistant = assistant
+        self.cleaned = False
+
+    def run(self):
+        from ..core.tts_worker import global_tts
+        try:
+            self.cleaned = global_tts.shutdown() and self.assistant.close()
+        except Exception:
+            self.cleaned = False
+
+
 class SettingsTab(QWidget):
     def __init__(self, assistant: AerisAssistant, parent: QWidget | None = None):
         super().__init__(parent)
         self.assistant = assistant
         layout = QFormLayout(self)
+        if self.assistant.config.recovery_message:
+            warning = QLabel(self.assistant.config.recovery_message)
+            warning.setWordWrap(True)
+            layout.addRow(warning)
         
         self.ai_enabled = QCheckBox()
         self.ai_enabled.setChecked(self.assistant.config.ai_enabled)
@@ -320,28 +364,37 @@ class SettingsTab(QWidget):
         self.wake_word.setText(self.assistant.config.wake_word)
         layout.addRow("Wake Word:", self.wake_word)
         
-        save_btn = QPushButton("Save Settings")
-        save_btn.clicked.connect(self.save_settings)
-        layout.addRow("", save_btn)
+        self.save_btn = QPushButton("Save Settings")
+        self.save_btn.clicked.connect(self.save_settings)
+        layout.addRow("", self.save_btn)
+        self.save_status = QLabel("")
+        self.save_status.setWordWrap(True)
+        layout.addRow(self.save_status)
+        self.apply_worker = None
         
     @Slot()
     def save_settings(self) -> None:
+        if self.apply_worker and self.apply_worker.isRunning():
+            return
         config = self.assistant.config.with_overrides(
             ai_enabled=self.ai_enabled.isChecked(), dry_run=self.dry_run.isChecked(),
             hands_free=self.hands_free.isChecked(), require_signed_installers=self.require_signed.isChecked(),
             gemini_api_key=self.api_key.text().strip() or None, wake_word=self.wake_word.text().strip() or "aeris")
         
-        try:
-            self.assistant.apply_settings(config)
-            window = self.window()
-            if isinstance(window, AerisMainWindow):
-                window.restart_voice()
-                window.mode_label.setText("SIMULATION — no PC changes" if config.dry_run else "LIVE — real PC actions")
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Settings Saved", "Executor/provider settings applied. Voice restarts after capture cleanup.")
-        except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Error", f"Failed to save settings: {e}")
+        self.save_btn.setEnabled(False)
+        self.save_status.setText("Applying settings — existing mode remains effective until completed")
+        self.apply_worker = SettingsApplyWorker(self.assistant, config, self)
+        self.apply_worker.completed.connect(self.settings_completed)
+        self.apply_worker.start()
+
+    @Slot(bool, str)
+    def settings_completed(self, success, message):
+        self.save_btn.setEnabled(True)
+        self.save_status.setText(message)
+        window = self.window()
+        if success and isinstance(window, AerisMainWindow) and not window._closing:
+            window.restart_voice()
+            window.mode_label.setText("SIMULATION — no PC changes" if self.assistant.registry.dry_run else "LIVE — real PC actions")
 
 
 class AppGridTab(QWidget):
@@ -357,7 +410,7 @@ class AppGridTab(QWidget):
         btn_layout = QHBoxLayout()
         
         daily_brief_btn = QPushButton("Daily Brief")
-        daily_brief_btn.clicked.connect(lambda: self.run_command("Read my latest emails and summarize my daily brief"))
+        daily_brief_btn.clicked.connect(lambda: self.run_command("daily brief"))
         btn_layout.addWidget(daily_brief_btn)
         
         system_health_btn = QPushButton("System Health Check")
@@ -381,6 +434,9 @@ class AerisMainWindow(QMainWindow):
     def __init__(self, assistant: AerisAssistant):
         super().__init__()
         self.assistant = assistant
+        self._closing = False
+        self._cleanup_worker = None
+        self._voice_generation = 0
         self.worker = AssistantWorker(assistant, self)
         self.worker.start()
         self.hands_free = HandsFreeWorker(assistant, self.worker, self)
@@ -394,28 +450,36 @@ class AerisMainWindow(QMainWindow):
         self.hands_free.start()
         
     def closeEvent(self, event: Any) -> None:
-        app_store.set("kill_switch_active", True)
-        if hasattr(self, 'hands_free'):
+        if not self._closing:
+            self._closing = True
+            self._voice_generation += 1
+            self.assistant.permissions.stop()
             self.hands_free.stop()
-        self.worker.stop_worker()
-        from ..core.tts_worker import global_tts
-        global_tts.shutdown()
-        if self.hands_free.isRunning() or self.worker.isRunning():
+            self.worker.stop_worker()
+        if self.hands_free.isRunning() or self.worker.isRunning() or (self.settings.apply_worker and self.settings.apply_worker.isRunning()):
             event.ignore()
             self.dashboard.update_status("Closing — waiting for owned workers to finish")
             QTimer.singleShot(100, self.close)
             return
-        if not self.assistant.close():
+        if self._cleanup_worker is None:
+            self._cleanup_worker = CleanupWorker(self.assistant, self)
+            self._cleanup_worker.start()
+        if self._cleanup_worker.isRunning() or not self._cleanup_worker.cleaned:
             event.ignore()
+            self.dashboard.update_status("Closing — adapter cleanup pending; window retained safely")
             QTimer.singleShot(100, self.close)
             return
-        self.hands_free.wait(1000)
-        self.worker.wait(1000)
         super().closeEvent(event)
 
     def restart_voice(self):
+        if self._closing:
+            return
+        self._voice_generation += 1
+        generation = self._voice_generation
         self.hands_free.stop()
         def restart():
+            if self._closing or generation != self._voice_generation:
+                return
             if self.hands_free.isRunning():
                 QTimer.singleShot(100, restart)
                 return
@@ -436,6 +500,8 @@ class AerisMainWindow(QMainWindow):
         self.tabs.addTab(self.dashboard, "Dashboard")
         self.tabs.addTab(self.apps, "Apps & Automation")
         self.tabs.addTab(self.settings, "Settings")
+        self.memory_view = MemoryView(self.assistant.memory)
+        self.tabs.addTab(self.memory_view, "Local memory")
         self.mode_label = QLabel("SIMULATION — no PC changes" if self.assistant.registry.dry_run else "LIVE — real PC actions")
         self.voice_label = QLabel("Microphone muted until listening is enabled or push-to-talk is pressed")
         self.dashboard.layout().insertWidget(0, self.mode_label)

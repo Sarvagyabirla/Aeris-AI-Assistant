@@ -4,11 +4,13 @@ import json
 import socket
 import threading
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from . import schemas
 from .audit import AuditLogger
 from .config import AerisConfig
+from .followup import FollowUpContext
 from .integrations.gemini import GeminiPlanner
 from .integrations.gmail import GmailClient
 from .integrations.google_calendar import GoogleCalendarClient
@@ -41,6 +43,7 @@ class AerisAssistant:
         self.permissions = PermissionEngine()
         self.registry = ToolRegistry(self.permissions, self.audit, dry_run=self.config.dry_run)
         self.router = LocalRouter()
+        self.followup = FollowUpContext()
         self._gemini = (
             GeminiPlanner(self.config.gemini_api_key, self.config.gemini_model)
             if self.config.ai_enabled and self.config.gemini_api_key
@@ -463,15 +466,24 @@ class AerisAssistant:
         if not self._task_lock.acquire(blocking=False):
             raise RuntimeError("Aeris is busy. Stop or finish the task before applying settings.")
         try:
+            staged = object.__new__(AerisAssistant)
+            staged.config = config
+            staged.permissions = self.permissions
+            staged.audit = self.audit
+            staged.registry = ToolRegistry(self.permissions, self.audit, dry_run=config.dry_run)
+            staged._gemini = GeminiPlanner(config.gemini_api_key, config.gemini_model) if config.ai_enabled and config.gemini_api_key else None
+            staged._ollama = OllamaPlanner() if config.ai_enabled else None
+            staged._register_tools()
             if not self._browser.close():
                 raise RuntimeError("Browser cleanup is pending; settings were not applied.")
             config.save()
             self.config = config
-            self.permissions = PermissionEngine()
-            self.registry = ToolRegistry(self.permissions, self.audit, dry_run=config.dry_run)
-            self._gemini = GeminiPlanner(config.gemini_api_key, config.gemini_model) if config.ai_enabled and config.gemini_api_key else None
-            self._ollama = OllamaPlanner() if config.ai_enabled else None
-            self._register_tools()
+            self.permissions.clear_session()
+            self.followup.clear()
+            self.registry = staged.registry
+            self._browser = staged._browser
+            self._gemini = staged._gemini
+            self._ollama = staged._ollama
         finally:
             self._task_lock.release()
 
@@ -494,12 +506,22 @@ class AerisAssistant:
         token: Any = None,
     ) -> AssistantTurn:
         user_text = text.strip()
+
+        if self.permissions.stopped and user_text.lower() not in {"status", "aeris status", "system status", "resume", "resume aeris", "start aeris"}:
+            result = ActionResult(False, "Global Stop is active. Explicitly resume Aeris first.", error="kill_switch")
+            return AssistantTurn(user_text, result.message, [result])
         
         if token:
             token.raise_if_cancelled()
+
+        if user_text.lower().strip(" .!") in {"daily brief", "my daily brief", "show daily brief"}:
+            self.followup.clear()
+            return self._daily_brief(user_text, approval_callback, token)
             
         self.last_timing.start("routing")
-        plan = self.router.route(user_text)
+        plan = self.followup.resolve(user_text, self.registry.dry_run)
+        if plan is None:
+            plan = self.router.route(user_text)
         self.last_timing.end("routing")
         if plan is None and self._gemini is not None:
             share_request = ActionRequest("privacy.share_request", {"text": user_text}, source_text=user_text)
@@ -565,8 +587,29 @@ class AerisAssistant:
                 break
 
         reply = "\n".join(line for line in lines if line).strip() or "Done."
+        self.followup.observe(plan.actions, results)
         self.memory.add("assistant", reply[:10_000], classification="SENSITIVE" if sensitive else "LOCAL_ONLY")
         return AssistantTurn(input_text=user_text, reply=reply, results=results)
+
+    def _daily_brief(self, text, approval_callback, token) -> AssistantTurn:
+        """Deterministic, local rendering of fetched records; never a cloud summary."""
+        lines = ["Daily Brief — retrieved " + datetime.now(timezone.utc).isoformat(timespec="seconds")]
+        results = []
+        for tool, heading in (("calendar.list_events", "Upcoming calendar events"),
+                              ("email.list_recent", "Recent email metadata")):
+            if token:
+                token.raise_if_cancelled()
+            action = ActionRequest(tool, {"count": 5}, source_text=text)
+            result = self.registry.execute(action, approval_callback, token=token)
+            results.append(result)
+            lines.append(heading + ": " + result.message)
+            if result.success and not result.dry_run:
+                lines.append(self._visible_details(action, result) or "No records returned.")
+            if self.permissions.stopped or (token and token.is_cancelled):
+                break
+        lines.append("Sources: authorized primary Calendar / connected Gmail. No cloud summary or sending. "
+                     "Reminders are not included: durable scheduling is not implemented.")
+        return AssistantTurn(text, "\n".join(lines), results)
 
     @staticmethod
     def _is_network_error(exc: Exception) -> bool:

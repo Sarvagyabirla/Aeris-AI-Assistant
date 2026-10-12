@@ -58,3 +58,13 @@ class AssistantTurn:
     input_text: str
     reply: str
     results: list[ActionResult] = field(default_factory=list)
+
+    def spoken_summary(self) -> str:
+        """Speak observed outcome, never an earlier planner promise."""
+        if not self.results:
+            return self.reply[:300]
+        failed = next((result for result in self.results if not result.success), None)
+        result = failed or self.results[-1]
+        if result.dry_run:
+            return "Simulation only. No computer changes were made."
+        return result.message[:300]

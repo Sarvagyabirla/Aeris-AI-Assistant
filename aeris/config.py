@@ -78,6 +78,7 @@ class AerisConfig:
     wake_word: str = "aeris"
     startup_greeting: bool = True
     coding_workspace: Path = Path.home() / "Documents" / "Aeris Projects"
+    recovery_message: str = ""
 
     @property
     def audit_log(self) -> Path:
@@ -94,14 +95,31 @@ class AerisConfig:
         
         settings_file = data_dir / "settings.json"
         settings = {}
+        recovery_message = ""
         if settings_file.exists():
             try:
                 settings = json.loads(settings_file.read_text(encoding="utf-8"))
                 if not isinstance(settings, dict):
                     raise ValueError("Settings must be an object")
+                for name in ("dry_run", "ai_enabled", "hands_free", "startup_greeting", "require_signed_installers"):
+                    if name in settings and type(settings[name]) is not bool:
+                        raise ValueError("Invalid saved boolean")
+                for name, minimum, maximum in (("voice_record_seconds", 2, 30), ("max_download_mb", 1, 2048)):
+                    if name in settings and (type(settings[name]) is not int or not minimum <= settings[name] <= maximum):
+                        raise ValueError("Invalid saved numeric bound")
+                for name in ("allowed_paths", "allowed_domains", "voice_device", "voice_language", "voice_model", "wake_word",
+                             "coding_workspace", "download_dir", "gemini_model", "gmail_credentials_file",
+                             "app_catalog_file", "package_catalog_file"):
+                    if name in settings and not isinstance(settings[name], str):
+                        raise ValueError("Invalid saved string")
+                if "voice_device" in settings and settings["voice_device"] not in {"cpu", "cuda", "auto"}:
+                    raise ValueError("Invalid saved device")
+                if "wake_word" in settings and not 1 <= len(settings["wake_word"].strip()) <= 80:
+                    raise ValueError("Invalid saved wake phrase")
             except (OSError, ValueError):
                 warnings.warn("Settings unreadable: simulation enabled and file access disabled.", RuntimeWarning)
-                settings = {"allowed_paths": "", "dry_run": True, "hands_free": False}
+                recovery_message = "Settings are invalid. Original file preserved. Simulation, AI and listening disabled; repair settings.json."
+                settings = {"allowed_paths": "", "dry_run": True, "hands_free": False, "ai_enabled": False}
         from .secrets import read_key, write_key
         legacy_key = settings.get("gemini_api_key")
         if legacy_key:
@@ -140,6 +158,7 @@ class AerisConfig:
         data_dir.mkdir(parents=True, exist_ok=True)
         config = cls(
             data_dir=data_dir,
+            recovery_message=recovery_message,
             allowed_paths=allowed_paths,
             dry_run=get_bool("dry_run", "AERIS_DRY_RUN", True),
             ai_enabled=get_bool("ai_enabled", "AERIS_AI_ENABLED", True),
@@ -214,8 +233,8 @@ class AerisConfig:
         if settings_file.exists():
             try:
                 settings = json.loads(settings_file.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+            except (OSError, ValueError) as exc:
+                raise ValueError("Settings file is unreadable. Original preserved; repair it before saving.") from exc
                 
         if not isinstance(settings, dict):
             raise ValueError("Existing settings must be an object")
@@ -223,7 +242,7 @@ class AerisConfig:
         write_key(self.data_dir, self.gemini_api_key)
         settings.pop("gemini_api_key", None)
         for key, value in asdict(self).items():
-            if key in {"gemini_api_key", "data_dir"}:
+            if key in {"gemini_api_key", "data_dir", "recovery_message"}:
                 continue
             if isinstance(value, Path):
                 value = str(value)

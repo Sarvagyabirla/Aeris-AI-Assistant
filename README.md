@@ -1,8 +1,38 @@
 # Aeris — Windows personal assistant (active development)
 
+### Current continuation increment
+
+Owned winget, Defender and signature-check processes now support token cancellation, bounded
+output and deadlines. Detached/elevated installers are **not** guaranteed to stop; interrupted
+installation state is uncertain and must be inspected before retrying. Package install success
+requires a separate exact package-list observation; version/publisher checks remain incomplete.
+Installer files fail closed unless Defender scanning completes. Downloads preserve/report artifacts
+if cancellation arrives after publication; socket/DNS waits remain bounded but not instantly cancellable.
+
+Settings adapters are prepared before effective publication and applied on a GUI-owned background
+worker. Close cleanup also runs off the Qt event loop, once; a failed cleanup retains the window
+instead of destroying live workers. Rapid voice restart callbacks are generation-guarded.
+
+`make it 40` works for a recent successful absolute volume/brightness command for 30 seconds,
+with unchanged simulation mode. Expired/intervening context asks which control; no generic `yes`
+authorizes actions. Stop cancels a task; **Emergency Stop** blocks future tasks until `resume Aeris`.
+Microphone mute remains separate. These workflows are fixture verified, not real-device certified.
+
 One Python/PySide6 project. Daily launcher: **START_AERIS.bat**.
 
 ## Verified status — 12 October 2026
+
+Current reviewed baseline: `6b22de3d6624ea2ad5aa58de0cc0edc00ff1907d`.
+New increment adds cancellation checkpoints/atomic project publication, expiring exact-scope grants,
+preserved global Stop across settings, typed saved-settings recovery, metadata-only audit defaults,
+and native PortAudio failure recovery. CI now installs Ubuntu PortAudio with a separate lint job;
+remote CI has not been rerun in this local session.
+
+Daily Brief now retrieves up to five authorized upcoming events and five recent email metadata
+records through the normal registry, without an LLM or sending. Simulation does not fetch.
+It displays source timestamps verbatim (including offsets), not a timezone-converted all-day agenda.
+The Local memory tab explicitly inspects, corrects and forgets recent conversation records.
+It is not yet a durable project-fact/reminder manager. GUI speech uses tool outcomes, not planner promises.
 
 The current increment repairs foundation defects and connects existing desktop voice/result paths.
 It is **not yet the completed personal Jarvis application**. Do not treat registered tools as device verification.
@@ -47,7 +77,7 @@ Whisper may download its model on first actual voice use. Offline ASR requires c
   LOCAL_ONLY history is never included in cloud planner context. Only bounded explicit SHAREABLE records are included.
 - Flexible cloud requests require an exact current-request sharing decision before the provider call.
   Files/screens have separate permissions; a configured API key is not universal upload consent.
-- Memory management APIs exist, but a complete inspect/edit/reminder UI is still pending.
+- Local memory supports inspect/correct/forget; export/retention UI and reminders remain pending.
 - Screen capture without explicit region fails closed. Screen monitoring is unavailable until safe preview/scope UI exists.
 - Browser click/fill require confirmation and observed URL. DNS-resolved private-network defense and same-URL
   DOM target identity remain unfinished; do not use this as a secure unattended consequential automation service.
@@ -89,7 +119,8 @@ No verified executable is supplied by this increment. Source packaging command s
 - Browser unavailable: install the browser extra and its Chromium runtime; waits now fail usefully rather than hang indefinitely.
 - Screen scope required: selected-region/crop workflow is unfinished; do not bypass the guard.
 - Patch rejected: use a fresh exact-byte SHA256 and a nonempty unique match; no hidden overwrite/commit/push occurs.
-- Reminders require implementation, not merely leaving the app open. Daily Brief is still a shortcut, not retrieved-data completion.
+- Reminders require implementation, not merely leaving the app open. Daily Brief retrieves bounded event/mail metadata;
+  local reminders, account display, conversational drafts and rich summaries remain incomplete.
 
 Gmail OAuth setup remains documented in `docs/GMAIL_SETUP.md`. Use designated test accounts for acceptance;
 never send to real contacts as an automated test. Pending workflows are listed in the status/matrix documents.

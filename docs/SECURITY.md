@@ -1,3 +1,28 @@
+# Native/lifecycle continuation
+
+Owned process cancellation targets the process created by Aeris and descendants enumerated from
+that PID, never application names or unrelated processes. This is not an isolation sandbox or a
+Windows Job Object; reparented, detached or elevated installer effects can remain uncertain.
+Native output is bounded and shown only in explicit tool results, not printed/logged by the runner.
+Installer Defender failure/unavailability now blocks launch. Approved file hash/signer binding is
+still incomplete. Network DNS and socket reads still have blocking boundaries; do not claim instant Stop.
+Task Cancel and global Emergency Stop are distinct; global state is authoritative in PermissionEngine.
+Settings preparation and shutdown are owned background jobs; failed cleanup retains the window.
+
+# Current increment — 12 October 2026
+
+SESSION grants now bind the canonical tool/argument fingerprint and expire after the configured
+approval TTL (default 90 seconds). Different capture regions require new permission. Stop/settings
+invalidate session grants; settings preserve global Stop. This is not full window/account identity
+support: only identities actually supplied in canonical arguments are bound.
+Audit files persist safe status/tool metadata, not arbitrary request/result/exception bodies.
+Coding cloud generation requires separate explicit sharing consent. Sensitive default logging is off.
+Short project publication is linearized against cancellation; cancellation after publication reports
+the remaining artifact instead of promising rollback. Native blocking I/O, installer identity,
+DNS peer restrictions and general filesystem race-resistant handles remain incomplete.
+Untrusted mail/browser text is data; Daily Brief renders retrieved metadata locally and never
+executes retrieved instructions or sends messages. No automatic cloud summarization is added.
+
 # Aeris security model
 
 Aeris is intentionally permission-first. The AI planner cannot call the operating system directly. It can only request registered tools, and the registry validates the tool name, required arguments, permission level, kill switch, and dry-run state.

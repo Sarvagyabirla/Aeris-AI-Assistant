@@ -77,6 +77,17 @@ def test_settings_change_effective_executor(tmp_path, credential_store):
     assert called == [{}]
 
 
+def test_failed_adapter_preparation_preserves_effective_settings(tmp_path, credential_store):
+    assistant = AerisAssistant(make_config(tmp_path))
+    previous = assistant.registry
+    bad_catalog = tmp_path / "broken-catalog.json"
+    bad_catalog.write_text("{broken")
+    with pytest.raises(ValueError):
+        assistant.apply_settings(assistant.config.with_overrides(dry_run=False, package_catalog_file=bad_catalog))
+    assert assistant.registry is previous and assistant.config.dry_run
+    assert not (assistant.config.data_dir / "settings.json").exists()
+
+
 def test_canonical_url_and_omitted_filename_match_approval(tmp_path):
     assistant = AerisAssistant(make_config(tmp_path, dry_run=False))
     previews, executions = [], []

@@ -65,7 +65,7 @@ class AuditLogger:
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "event": event,
-            "details": redact(details),
+            "details": self._metadata(details),
         }
         with self._lock:
             # Rotate if file > 5MB
@@ -77,3 +77,18 @@ class AuditLogger:
                 
             with self.path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    @staticmethod
+    def _metadata(details: dict[str, Any]) -> dict[str, Any]:
+        """Persist structure/status only, never arbitrary exception or result bodies."""
+        safe = {}
+        for key, value in details.items():
+            if _SECRET_KEY.search(key):
+                safe[key] = "[REDACTED]"
+            elif key in {"success", "dry_run", "cancelled"} and isinstance(value, bool):
+                safe[key] = value
+            elif key == "request" and isinstance(value, dict):
+                safe[key] = {"tool": str(value.get("tool", ""))[:100]}
+            elif key in {"duration_ms", "count"} and type(value) in {int, float}:
+                safe[key] = value
+        return safe

@@ -1,5 +1,27 @@
 # Performance — measured subset, 12 October 2026
 
+## Native/lifecycle continuation measurement (newest)
+
+30 simulated warm controller trials: construction 3.789 ms (single sample), p50 5.940 ms,
+p95 7.126 ms, routing p95 0.0812 ms, zero failures. Hardware/procedure unchanged below.
+Raw samples: `evidence/native-lifecycle-local-warm.json`. No optimization/speedup claim.
+Owned process runner polls at 20 ms; termination waits total up to approximately 2.1 seconds,
+plus 0.5-second reader join, excluding process creation/enumeration/OS scheduling. These are
+implementation bounds, not measured device Stop timings; detached/elevated effects remain uncertain.
+Settings/cleanup GUI responsiveness is event-loop fixture tested but acknowledgment latency,
+real ASR/TTS and resource use remain NOT MEASURED.
+
+## Current follow-on measurement (6b22de3 baseline plus uncommitted changes)
+
+Same hardware/interpreter and simulated warm procedure below, 30 trials, all retained:
+construction 6.657 ms (one sample), total p50 5.758 ms, total p95 6.836 ms,
+routing p95 0.0704 ms, failure rate 0%. Raw samples: `evidence/phase1-local-warm.json`.
+Reproduce with `scripts/measure_local.py --trials 30 --output docs/evidence/phase1-local-warm.json`.
+No before/after optimization claim; disk/controller variation is not actual app/audio improvement.
+UI acknowledgment, Stop acknowledgment/quiescence, idle/active CPU/RAM, ASR, TTS audible output,
+cloud and real app effects remain NOT MEASURED. Generation has 30-second HTTP bound and
+late-result checks; owned native process cancellation is not yet implemented.
+
 ## Production stage definitions
 
 `StageTimer` uses monotonic `perf_counter`; per-task command identity is inherited from the GUI token

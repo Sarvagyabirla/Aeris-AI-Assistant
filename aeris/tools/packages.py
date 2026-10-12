@@ -5,9 +5,9 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 from pathlib import Path
 
+from ..core.process_runner import run_owned
 from ..models import ActionResult
 from .downloads import DownloadTools
 from .filesystem import PathGuard
@@ -67,7 +67,9 @@ class PackageTools:
         lines = [line.rstrip() for line in cleaned.splitlines() if line.strip()]
         return "\n".join(lines[-80:])[-8_000:]
 
-    def _run_winget(self, arguments: list[str], *, timeout: int = 600) -> ActionResult:
+    def _run_winget(self, arguments: list[str], *, timeout: int = 600, token=None) -> ActionResult:
+        if token and token.is_cancelled:
+            return ActionResult(False, "Package command cancelled before launch.", error="cancelled")
         if failure := self._require_windows():
             return failure
         executable = shutil.which("winget")
@@ -78,23 +80,12 @@ class PackageTools:
                 error="winget_missing",
             )
         
-        command_str = " ".join([executable, *arguments])
-        logger.info(f"Executing package manager command: {command_str}")
-        print(f"[PackageTools] Executing package manager command: {command_str}")
-        
-        try:
-            completed = subprocess.run(
-                [executable, *arguments],
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=timeout,
-                check=False,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except subprocess.TimeoutExpired:
-            return ActionResult(False, "Windows Package Manager timed out safely.", error="winget_timeout")
-        output = self._clean_output((completed.stdout or "") + "\n" + (completed.stderr or ""))
+        completed = run_owned([executable, *arguments], timeout=timeout, token=token)
+        if completed.reason:
+            return ActionResult(False, "Package command interrupted. Installation state may be uncertain; inspect before retrying.",
+                data={"cleanup_complete": completed.cleanup_complete, "uncertain": arguments[0] in {"install", "uninstall", "upgrade"}},
+                error=completed.reason)
+        output = self._clean_output(completed.output)
         if completed.returncode != 0:
             return ActionResult(
                 False,
@@ -104,7 +95,7 @@ class PackageTools:
             )
         return ActionResult(True, "Windows Package Manager completed the request.", data={"output": output})
 
-    def search(self, arguments: dict[str, object]) -> ActionResult:
+    def search(self, arguments: dict[str, object], token=None) -> ActionResult:
         try:
             query = self._clean_query(arguments["query"])
         except ValueError as exc:
@@ -112,12 +103,13 @@ class PackageTools:
         result = self._run_winget(
             ["search", "--query", query, "--source", "winget", "--accept-source-agreements"],
             timeout=120,
+            token=token,
         )
         if result.success:
             result.message = f"Package search results for {query}."
         return result
 
-    def install(self, arguments: dict[str, object]) -> ActionResult:
+    def install(self, arguments: dict[str, object], token=None) -> ActionResult:
         try:
             selector, package = self._package_selector(arguments["package"])
         except ValueError as exc:
@@ -132,25 +124,29 @@ class PackageTools:
                 "winget",
                 "--accept-source-agreements",
                 "--accept-package-agreements",
-            ]
+            ], token=token,
         )
         if result.success:
-            result.message = f"Installed {package} through Windows Package Manager."
+            observed = self._run_winget(["list", selector, package, "--exact", "--disable-interactivity"], timeout=30, token=token)
+            if not observed.success or package.lower() not in str(observed.data.get("output", "")).lower():
+                return ActionResult(False, "Package manager exited, but installed presence was not verified. Inspect before retrying.",
+                    data={"package": package, "uncertain": True}, error="installation_unverified")
+            result.message = f"Package presence verified for {package}. Version/publisher verification remains unavailable."
             result.data["package"] = package
         return result
 
-    def uninstall(self, arguments: dict[str, object]) -> ActionResult:
+    def uninstall(self, arguments: dict[str, object], token=None) -> ActionResult:
         try:
             selector, package = self._package_selector(arguments["package"])
         except ValueError as exc:
             return ActionResult(False, str(exc), error="invalid_package_query")
-        result = self._run_winget(["uninstall", selector, package, "--exact"])
+        result = self._run_winget(["uninstall", selector, package, "--exact"], token=token)
         if result.success:
-            result.message = f"Uninstalled {package}."
+            result.message = f"Uninstall command exited for {package}; absence is not yet verified."
             result.data["package"] = package
         return result
 
-    def update(self, arguments: dict[str, object]) -> ActionResult:
+    def update(self, arguments: dict[str, object], token=None) -> ActionResult:
         try:
             selector, package = self._package_selector(arguments["package"])
         except ValueError as exc:
@@ -165,27 +161,27 @@ class PackageTools:
                 "winget",
                 "--accept-source-agreements",
                 "--accept-package-agreements",
-            ]
+            ], token=token,
         )
         if result.success:
-            result.message = f"Updated {package}."
+            result.message = f"Update command exited for {package}; installed version is not yet verified."
             result.data["package"] = package
         return result
 
-    def list_installed(self, _: dict[str, object]) -> ActionResult:
-        result = self._run_winget(["list"], timeout=180)
+    def list_installed(self, _: dict[str, object], token=None) -> ActionResult:
+        result = self._run_winget(["list"], timeout=180, token=token)
         if result.success:
             result.message = "Loaded installed applications."
         return result
 
-    def list_updates(self, _: dict[str, object]) -> ActionResult:
-        result = self._run_winget(["upgrade", "--source", "winget", "--accept-source-agreements"], timeout=180)
+    def list_updates(self, _: dict[str, object], token=None) -> ActionResult:
+        result = self._run_winget(["upgrade", "--source", "winget", "--accept-source-agreements"], timeout=180, token=token)
         if result.success:
             result.message = "Loaded available app updates."
         return result
 
     @staticmethod
-    def _signature(path: Path) -> tuple[str, str]:
+    def _signature(path: Path, token=None) -> tuple[str, str]:
         powershell = shutil.which("powershell.exe") or shutil.which("powershell")
         if not powershell:
             return "Unknown", "PowerShell is unavailable"
@@ -194,22 +190,15 @@ class PackageTools:
             "$subject = if ($s.SignerCertificate) {$s.SignerCertificate.Subject} else {''}; "
             "Write-Output ($s.Status.ToString() + '|' + $subject)"
         )
-        try:
-            completed = subprocess.run(
-                [powershell, "-NoProfile", "-NonInteractive", "-Command", script, str(path)],
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=30,
-                check=False,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except (OSError, subprocess.TimeoutExpired):
+        completed = run_owned([powershell, "-NoProfile", "-NonInteractive", "-Command", script, str(path)], timeout=30, token=token)
+        if completed.reason or completed.returncode != 0:
             return "Unknown", "Signature check failed"
-        status, _, signer = (completed.stdout or "Unknown|").strip().partition("|")
+        status, _, signer = (completed.output or "Unknown|").strip().partition("|")
         return status or "Unknown", signer.strip()
 
-    def install_file(self, arguments: dict[str, object]) -> ActionResult:
+    def install_file(self, arguments: dict[str, object], token=None) -> ActionResult:
+        if token:
+            token.raise_if_cancelled()
         if failure := self._require_windows():
             return failure
         try:
@@ -221,14 +210,20 @@ class PackageTools:
         if path.suffix.lower() not in _INSTALLER_EXTENSIONS:
             return ActionResult(False, "Only Windows installer file types are allowed.", error="not_installer")
 
-        scan_status = DownloadTools._defender_scan(path)
+        scan_status = DownloadTools._defender_scan(path, token=token)
+        if token:
+            token.raise_if_cancelled()
+        if scan_status != "completed":
+            return ActionResult(False, "Installer was not launched: required Defender scan did not pass.", error="scan_unverified")
         if scan_status == "attention_required":
             return ActionResult(
                 False,
                 "Microsoft Defender reported that this installer requires attention. It was not launched.",
                 error="defender_attention",
             )
-        signature_status, signer = self._signature(path)
+        signature_status, signer = self._signature(path, token=token)
+        if token:
+            token.raise_if_cancelled()
         if self.require_signed_installers and signature_status.lower() != "valid":
             return ActionResult(
                 False,
@@ -237,8 +232,8 @@ class PackageTools:
                 error="invalid_signature",
             )
 
-        logger.info(f"Executing installer: {path}")
-        print(f"[PackageTools] Executing installer: {path}")
+        if token:
+            token.raise_if_cancelled()
         try:
             if path.suffix.lower() == ".msi":
                 # Let the OS prompt for UAC instead of wrapping with 'runas'

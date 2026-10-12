@@ -1,5 +1,126 @@
 # Validation report — 12 October 2026
 
+## Native cancellation and Qt lifecycle continuation (latest)
+
+Nested root/HEAD/branch unchanged; pending previous increment retained; no user-data or secret reads.
+Baseline rerun: **161 passed, 1 skipped**, 1.87 s; clean Ruff. Same existing Windows Python 3.11.9
+environment. Three new native regressions failed before repair (0.24 s) and pass after repair.
+
+| Issue | Production change / deterministic evidence | Real acceptance |
+|---|---|---|
+| Tokenless winget/Defender | process_runner.py, packages.py, downloads.py; cancelled tokens launch neither; real harmless Python child cancellation/timeout reaped; output capped at 1024 fixture bytes | No winget install or Defender scan run |
+| False verified install | Separate winget exact-list observation; fake missing presence returns installation_unverified | Package version/publisher still incomplete; no install |
+| Late download publication/scan | Atomic token commit; post-publication cancellation reports retained artifact; scan token passed | Network read/DNS cancellation still incomplete |
+| Blocking settings | SettingsApplyWorker; slow fake cleanup/apply runs while Qt pumps; failed catalog preparation preserves old registry/config and no settings write | Supervised settings/credential backend not run |
+| Blocking/repeated close cleanup | CleanupWorker owns one cleanup attempt; slow fixture runs off GUI, repeated close does not duplicate; voice restarts invalidated on close | Real cold-ASR and native shutdown not tested |
+| Follow-up make it 40 | followup.py + real controller; volume reference/expiry/intervening task/out-of-range/Stop scenarios pass | Real ASR not run; only absolute volume/brightness numeric follow-up |
+| Stop contract mismatch | Task cancellation clears task/follow-up; Emergency Stop calls authoritative PermissionEngine and requires resume | UI hardware Stop timing not measured |
+
+Full suite: **173 collected, 172 passed, 1 skipped**, 2.79 s. Skip: Windows symlink privilege
+(`test_settings_lifecycle.py:183`); junction fixture retained. Ruff, compileall, git diff --check pass
+(LF/CRLF advisories only). Focused native/process/Qt tests: 12 passed in 1.36 s before later tests.
+No dependency install, real network/model, device modification, sensitive capture or external send.
+Qt/Python/psutil official threading/process references consulted; no new dependency introduced.
+
+Screenshot `evidence/native-lifecycle-desktop.png` is a sanitized real-widget simulation screenshot,
+not live device acceptance. 30 warm simulated-controller trials: p50 **5.940 ms**, p95 **7.126 ms**,
+0 failures; raw samples `evidence/native-lifecycle-local-warm.json`. Construction single sample 3.789 ms.
+This does not measure audible speech, capture, GUI acknowledgment or external task quiescence.
+
+### Acceptance matrix updates (other rows retain the earlier incomplete/not-run status)
+
+| Scenario | Current implementation / fixture | Real device | Timing |
+|---|---|---|---|
+| Stop during package/scan | Cooperative owned-process boundary PASS; detached installers uncertain | NOT RUN | 20 ms poll interval, cleanup waits bounded in code; no device latency measurement |
+| Follow-up make it 40 | Connected absolute-control context PASS | NOT RUN | Not measured |
+| Close/reopen busy and settings | Off-GUI owned cleanup/settings slow-fixture PASS; failure keeps window | NOT RUN | Not measured |
+| Installer verification | Defender must pass; token checks; package presence observed | NOT RUN | Not measured; exact approved hash/signer incomplete |
+
+Commands: existing interpreter `-m pytest -ra`, `-m ruff check .`, `-m compileall -q aeris`;
+`git --no-pager diff --check`; measurement/capture scripts with output destinations above.
+No executable build: PyInstaller remains absent; clean-account frozen acceptance incomplete.
+
+## Follow-on local increment (current evidence; preserves earlier report below)
+
+Baseline HEAD `6b22de3d6624ea2ad5aa58de0cc0edc00ff1907d`, branch
+`fix/responsive-aeris-desktop`, clean worktree, nested root confirmed with git rev-parse.
+No AGENTS.md found in parent/project. Existing `.venv\Scripts\python.exe`: Python 3.11.9,
+Windows 10.0.26200, Pydantic 2.13.5, PySide6 6.11.2, pytest 9.1.1, installed Ruff 0.16.5,
+google-genai 2.22.0. No dependencies installed or environment replaced.
+
+Baseline: 142 passed, 1 skipped (143 collected), 1.62 seconds; Ruff and offline diagnostics passed.
+Six newly added regressions failed before repair in 0.39 seconds:
+generation/repair cancelled by model still opened published project (2); changed region/expiry
+reused tool-name grant; settings reset global stop; native PortAudio import escaped; arbitrary
+private audit markers persisted. These tests use the real registry/controller boundaries and fakes.
+
+| Repair / connected addition | Changed files | Evidence |
+|---|---|---|
+| Cancellation-before-publication, repair and staging; honest after-publication outcome | coding.py, state.py | Provider cancels during generation/repair: no project/editor; staging removed; post-publish result includes existing artifact; expired deadline blocks commit |
+| Exact expiring session capture scope, invalidated confirmation | permissions.py | Region A/B gives two prompts; expiry re-prompts; stop/resume during confirmation denies |
+| Global Stop survives settings and blocks planner entry | assistant.py | Real settings apply remains stopped; next local command denied |
+| Strict saved types/recovery without deleting original | config.py, desktop.py | Invalid booleans, numeric bool, roots list and device preserved; simulation/AI off/no roots; recovery banner |
+| Metadata-only audit | audit.py | Unique private path/result/error/custom markers absent from actual persisted JSONL; safe tool/status retained |
+| Separate coding cloud consent | registry.py | Denied sharing invokes no handler/model; explicit preview discloses generation/one repair |
+| Broken native audio runtime | voice.py, regression.yml | Injected OSError becomes VoiceUnavailableError; Ubuntu audio job installs libportaudio2; remote CI not run |
+| Verified speech summary | models.py, desktop.py | Failure spoken instead of planner promise; simulation speech explicitly says no changes |
+| Real Daily Brief retrieval | assistant.py, desktop.py | Two authorized fake adapters return grounded event/mail metadata; denial/simulation fetch nothing; no planner/send path; malicious snippet does not become an action |
+| Local conversation view | ui/memory_view.py, desktop.py | Qt event loop inspects and forgets chosen temp record; correction uses existing validated store API |
+
+Final local checks: **162 collected, 161 passed, 1 skipped**, 1.89 seconds. Skip unchanged:
+Windows symlink creation needs Developer Mode/elevation (`test_settings_lifecycle.py:172`).
+Existing Windows junction fixture passes. No blanket voice exclusion. Ruff and compileall passed;
+git diff --check passed apart from LF/CRLF advisory. --help flags unchanged and verified;
+--self-test passed from TEMP, without device/account/model/network probing.
+
+30 warm simulated production-controller trials: p50 5.758 ms, p95 6.836 ms, 0 failures.
+Raw data: `evidence/phase1-local-warm.json`. Real-widget screenshot generated and visually inspected:
+`evidence/phase1-desktop-fixture.png`; SIMULATION, result, controls, Local memory tab visible.
+Font/size-hint warnings printed by offscreen Qt, but screenshot rendered legibly.
+First benchmark/screenshot invocation omitted required output arguments and failed; rerun with
+`--output` / destination succeeded. These invocation failures are not hidden as successful trials.
+
+Official sounddevice installation reference checked: Linux may need separate PortAudio package.
+Official Google Gen AI client-lifecycle documentation checked; installed Client.close exists and
+generation now closes its client in finally. No model IDs/dependencies replaced.
+
+### Required scenario matrix — current evidence, not a completion claim
+
+Real-device checks below are **NOT RUN: supervised explicit authorization required**. Packaging
+also cannot be exercised in the current interpreter without reviewed PyInstaller setup.
+Only controller fixture timing is measured; scenario/device timings are NOT MEASURED.
+
+| Scenario | Implementation / fixture result | Real-device result / remaining limitation |
+|---|---|---|
+| Open existing config | Qt dispatch/close fixture PASS; mode/listening preferences preserved | NOT RUN; full onboarding missing |
+| Offline volume/brightness/pause/Notepad | Existing local route fixtures PASS | NOT RUN; media absolute-state/postconditions incomplete |
+| English/Hinglish | Existing router fixtures PASS | NOT RUN; confidence/ambiguity ASR incomplete |
+| Stop TTS/model/code/download/packages | Code generation/repair/staging + owner-TTS fixtures PASS | NOT RUN; network load/download/winget/scan quiescence remains incomplete |
+| Follow-up make it 40 | NOT IMPLEMENTED as task-bound context | NOT RUN |
+| Screen no prior scope | Guard PASS, selector/preview NOT IMPLEMENTED | NOT RUN; cannot claim connected screen help |
+| Screen changed region/window | Exact-region permission regression PASS | NOT RUN; window identity/preview missing |
+| Browser replaced target | Existing URL/uniqueness fixtures only | NOT RUN; same-URL DOM identity incomplete |
+| Browser/download prior outputs | Typed output-reference executor NOT IMPLEMENTED | NOT RUN |
+| Find/install package | Existing adapter fixtures only | NOT RUN; cancellable owned processes/verified presence incomplete |
+| Generate/repair project | Syntax validation + publication cancellation PASS | NOT RUN; transactional diff/authorized checks/Undo incomplete |
+| Organize Downloads | Reviewable organization/Undo NOT IMPLEMENTED | NOT RUN |
+| Reminder restart/sleep | Durable scheduler NOT IMPLEMENTED | NOT RUN |
+| Study routine | Persisted typed routine workflow NOT IMPLEMENTED | NOT RUN |
+| Daily Brief fake mail/calendar | Connected bounded metadata retrieval PASS | NOT RUN; reminders/account display/drafts incomplete |
+| Deny/cancel/stale approval | Scope/denied-cloud/no-late-publish fixtures PASS | NOT RUN; native adapters not universally cancellable |
+| Invalid settings/credentials | Typed recovery + existing fake-keyring tests PASS | NOT RUN; startup credential-failure recovery UI incomplete |
+| Close/reopen busy | Existing Qt worker cancellation/close PASS | NOT RUN; settings/cleanup joins need asynchronous redesign |
+| Frozen different cwd | Source diagnostics/resources PASS | NOT BUILT: PyInstaller absent; executable acceptance outstanding |
+
+### Commands actually executed
+
+From project root with existing interpreter: `-m pytest -ra`, `-m ruff check .`,
+`-m compileall -q aeris`, `-m aeris --help`, `git diff --check`;
+`scripts/measure_local.py --trials 30 --output docs/evidence/phase1-local-warm.json`;
+`scripts/capture_fixture_ui.py docs/evidence/phase1-desktop-fixture.png`.
+From TEMP: absolute interpreter `-m aeris --self-test`.
+No real sends, installs, account access, microphone capture, screen capture or device changes.
+
 ## Scope/environment
 
 Actual nested Git root confirmed with `git rev-parse --show-toplevel`; starting commit

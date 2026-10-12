@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ..models import ActionResult
+from ..state import CancelledError
 from .filesystem import PathGuard
 
 _ALLOWED_SUFFIXES = {
@@ -81,7 +82,9 @@ class CodingTools:
             raise ValueError("Code planner must return one JSON object.")
         return payload
 
-    def _ask_model(self, request: str, repair_context: str = "") -> dict[str, Any]:
+    def _ask_model(self, request: str, repair_context: str = "", token=None) -> dict[str, Any]:
+        if token:
+            token.raise_if_cancelled()
         from google import genai
         from google.genai import types
 
@@ -109,11 +112,16 @@ Rules:
 {repair_context}
 """.strip()
         client = genai.Client(api_key=self.api_key, http_options={'timeout': 30_000})
-        response = client.models.generate_content(
-            model=self.model,
-            contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2),
-        )
+        try:
+            response = client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0.2),
+            )
+        finally:
+            client.close()
+        if token:
+            token.raise_if_cancelled()
         return self._extract_json(response.text or "")
 
     @staticmethod
@@ -194,7 +202,7 @@ Rules:
         except OSError:
             return "not_opened"
 
-    def create_project(self, arguments: dict[str, object]) -> ActionResult:
+    def create_project(self, arguments: dict[str, object], token=None) -> ActionResult:
         request = str(arguments["prompt"]).strip()
         if not request or len(request) > 8_000:
             return ActionResult(False, "The coding request is empty or too long.", error="invalid_prompt")
@@ -214,14 +222,20 @@ Rules:
         staging: Path | None = None
 
         try:
-            payload = self._ask_model(request)
+            if token:
+                token.raise_if_cancelled()
+            payload = self._ask_model(request, token=token)
+            if token:
+                token.raise_if_cancelled()
             files, validation_errors = self._validate_plan(payload)
             if validation_errors:
                 repair = (
                     "The first draft had these validation errors. Return the entire corrected project JSON:\n- "
                     + "\n- ".join(validation_errors[:10])
                 )
-                payload = self._ask_model(request, repair)
+                payload = self._ask_model(request, repair, token=token)
+                if token:
+                    token.raise_if_cancelled()
                 files, validation_errors = self._validate_plan(payload)
             if validation_errors:
                 return ActionResult(
@@ -231,23 +245,39 @@ Rules:
                     error="code_validation_failed",
                 )
             project_name = requested_name or str(payload.get("project_name", "")) or request[:60]
+            if token:
+                token.raise_if_cancelled()
             destination = self._destination(project_name)
             staging = Path(tempfile.mkdtemp(prefix=".aeris-building-", dir=destination.parent))
             for relative, content in files:
+                if token:
+                    token.raise_if_cancelled()
                 target = staging.joinpath(*relative.parts)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8", newline="\n")
-            staging.replace(destination)
+            if token:
+                token.raise_if_cancelled()
+            if token:
+                token.commit(lambda: staging.rename(destination))
+            else:
+                staging.rename(destination)
             staging = None
-        except Exception as exc:
+        except CancelledError:
+            if staging is not None:
+                shutil.rmtree(staging, ignore_errors=True)
+            return ActionResult(False, "Project generation cancelled before publication; no project was created.", error="cancelled")
+        except Exception:
             if staging is not None:
                 shutil.rmtree(staging, ignore_errors=True)
             return ActionResult(
                 False,
-                f"Aeris could not create the project safely: {exc}",
+                "Aeris could not create the project safely; no generated code was executed.",
                 error="code_generation_failed",
             )
 
+        if token and token.is_cancelled:
+            return ActionResult(False, "Cancellation arrived after publication. The project exists; editor was not opened.",
+                data={"project_path": str(destination), "published": True}, error="cancelled_after_publication")
         opened = self._open_project(destination)
         instructions = payload.get("run_instructions", [])
         if not isinstance(instructions, list):

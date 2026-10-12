@@ -1,24 +1,34 @@
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any, Callable
 
 
 class CancellationToken:
     """Thread-safe cancellation token for interrupting long-running operations."""
-    def __init__(self) -> None:
+    def __init__(self, deadline: float | None = None) -> None:
         self._event = threading.Event()
+        self.deadline = deadline
+        self._effect_lock = threading.RLock()
 
     @property
     def is_cancelled(self) -> bool:
-        return self._event.is_set()
+        return self._event.is_set() or (self.deadline is not None and time.monotonic() >= self.deadline)
 
     def cancel(self) -> None:
-        self._event.set()
+        with self._effect_lock:
+            self._event.set()
 
     def raise_if_cancelled(self) -> None:
-        if self._event.is_set():
+        if self.is_cancelled:
             raise CancelledError("Operation was cancelled.")
+
+    def commit(self, effect):
+        """Linearize a short atomic publication against cancellation (not blocking I/O)."""
+        with self._effect_lock:
+            self.raise_if_cancelled()
+            return effect()
 
 class CancelledError(Exception):
     """Raised when an operation is cancelled via CancellationToken."""

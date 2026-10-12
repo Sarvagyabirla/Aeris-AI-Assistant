@@ -1,5 +1,66 @@
 # Aeris Implementation Status — 12 October 2026
 
+## Native-cancellation / Qt-lifecycle continuation (newest evidence)
+
+Checkout still HEAD `6b22de3d6624ea2ad5aa58de0cc0edc00ff1907d`, same branch/root/interpreter.
+Previous uncommitted increment preserved. Baseline 161 passed/1 skipped. Three new regressions
+failed before repair: tokenless winget, tokenless Defender, process-exit-only install success.
+
+- **Implemented / fixture verified:** common bounded owned-process runner connected to winget,
+  Defender and signature inspection; cancellation/deadline/output-limit/reaping tests using harmless
+  Python child processes; no real software installs. Detached/elevated children remain outside a
+  guaranteed ownership boundary. Install interruption is uncertain, no blind retry.
+- **Implemented / fixture verified:** install exit is followed by exact package-list observation;
+  missing presence fails `installation_unverified`. Table parsing is conservative, not version proof.
+- **Implemented:** installer scan-unavailable/error/cancel fails closed; token checks before launch.
+  Approved hash/signer binding and file-identity race protection remain incomplete.
+- **Implemented / Qt fixture verified:** async settings apply; adapters prepare before save/effective
+  publish; failed catalog preparation leaves previous executor/settings; async one-owned close cleanup;
+  shutdown waits are not on GUI thread. Failure retains window. No unsafe QThread termination.
+- **Implemented / fixture verified:** 30-second ephemeral absolute-control follow-up; no model call
+  for missing/expired/invalid context. Intervening task/mode change/cancel clears reference.
+- **Implemented:** separate task Stop, microphone mute, Emergency Stop with explicit resume;
+  task cancellation no longer writes a mismatching global kill flag into app_store.
+
+Final regression: **172 passed, 1 skipped**, 173 collected. Ruff/compileall/diff check passed.
+Real microphone, UI desktop effects, UAC/account/browser and frozen executable are NOT RUN.
+All broader incomplete phases above/below remain incomplete. Do not read historical statements
+about blocking GUI settings as current: those specific waits are now moved off the event loop.
+
+Next priorities: cancellable DNS/socket transport and owned Windows Job Objects where practical;
+scoped installer hash/signature approval; explicit cached-ASR setup/interruption; typed observations
+and selected-screen preview; durable reminders/routines/project repair Undo; reviewed release build.
+
+## Follow-on increment against 6b22de3 (current; supersedes conflicting history)
+
+Starting checkout clean, branch `fix/responsive-aeris-desktop`; existing Windows Python 3.11.9 interpreter retained.
+Six confirmed failing reproductions were created before changes. All are repaired with fixture evidence.
+
+| Phase | Current narrower status |
+|---|---|
+| 1 Reliability/privacy | PARTIAL, fixture verified: generation/repair/staging cancellation, atomic publication gate, deadline support, honest post-publication result; exact expiring SESSION scope, stale confirmation invalidation, global Stop preserved through settings and blocks planner entry; strict saved types/recovery banner, metadata-only audit and separate coding cloud consent |
+| 2 Voice | PARTIAL: useful native import failure, verified-result speech. Acoustic interruption, cached-model onboarding/VAD and short-lived follow-up remain incomplete |
+| 3 Executor | INCOMPLETE: existing sequential failure blocking remains; no typed observation references/dependency controller |
+| 4 Screen/apps | INCOMPLETE: no-scope guard preserved; no connected selector/preview/UIA/watch |
+| 5 Browser/packages | INCOMPLETE: native blocking calls, peer DNS enforcement, DOM-bound target authorization and verified package presence remain |
+| 6 Coding | PARTIAL: cancellation-before-publication fixed; syntax-only validation remains. No multi-file diff/check/Undo workflow |
+| 7 Daily work | PARTIAL: bounded authorized Calendar/Gmail Daily Brief connected to shortcut/text and local rendering; local history inspect/correct/forget tab. Durable facts/reminders/routines/project continuation remain incomplete |
+| 8 UI | PARTIAL: real Qt memory controls and structured outcome speech. Settings/close cleanup still needs off-GUI lifecycle work; no tray/character/companion |
+| 9 Performance | 30 warm simulated production-controller trials recorded; not voice/device latency |
+| 10 CI/release | Ubuntu audio dependency and independent lint job implemented; remote run not performed. PyInstaller absent, no executable built |
+
+### Exact next implementation checklist (not external blockers)
+1. Owned cancellable subprocess adapter for winget/Defender; bounded streaming downloads; honest uncertain installation status.
+2. Off-GUI staged adapter/settings replacement and idempotent asynchronous shutdown; recovery for credential-store failure before window construction.
+3. Explicit cached-ASR first-use consent/readiness, interruption design and synthetic endpointing/follow-up tests.
+4. Typed observed step references/postconditions, bounded replan, screen selector/preview and transport-enforced browser restrictions.
+5. Durable timezone reminders/routines/projects plus transactional multi-file repair/Undo and account-specific Daily Brief readiness.
+6. Tray/companion/accessibility, maintained portable lock strategy, reviewed pinned packaging and clean-account frozen acceptance.
+
+No runtime memory, credentials, mail or browser profiles were read. No installs, real sends, desktop effects,
+model downloads, hidden commits or branch changes. Google generation can still wait for its existing 30-second
+HTTP timeout; checks prevent late publication, not instantaneous network quiescence.
+
 ## Current verified status (supersedes the legacy checklist below)
 
 This is a foundation repair increment, **not completion of the personal Jarvis mission**.
