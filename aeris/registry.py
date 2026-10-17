@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 from dataclasses import dataclass, replace
 from typing import Any, Callable
 
@@ -9,6 +10,7 @@ import pydantic
 from .audit import AuditLogger
 from .models import ActionRequest, ActionResult, PermissionLevel
 from .permissions import ApprovalCallback, PermissionEngine
+from .state import CancelledError
 
 ToolHandler = Callable[..., ActionResult]
 
@@ -22,6 +24,7 @@ class ToolSpec:
     required_args: tuple[str, ...] = ()
     arguments_schema: dict[str, Any] | None = None
     model: type[pydantic.BaseModel] | None = None
+    prepare: Callable[..., dict[str, Any] | ActionResult] | None = None
 
     def public_definition(self) -> dict[str, Any]:
         spec = {
@@ -59,7 +62,8 @@ class ToolRegistry:
         return tuple(sorted(self._tools))
 
     def definitions(self) -> list[dict[str, Any]]:
-        return [self._tools[name].public_definition() for name in sorted(self._tools)]
+        return [self._tools[name].public_definition() for name in sorted(self._tools)
+                if name != 'email.send_email' or 'email.send' not in self._tools]
 
     @staticmethod
     def _audit_request(request: ActionRequest) -> dict[str, Any]:
@@ -78,10 +82,18 @@ class ToolRegistry:
         if token:
             token.raise_if_cancelled()
         spec = self._tools.get(request.tool)
+        if not self.permissions.profile.allows(request.tool):
+            return ActionResult(False, 'This capability category is revoked. Review Permissions to grant it again.', error='permission_denied')
         if not spec:
             result = ActionResult(False, f"Unknown tool: {request.tool}", error="unknown_tool")
             self.audit.write("tool_rejected", request=self._audit_request(request), reason=result.error)
             return result
+
+        try:
+            if not isinstance(request.arguments, dict) or len(json.dumps(request.arguments, allow_nan=False).encode("utf-8")) > 262_144:
+                raise ValueError("Invalid or oversized tool payload")
+        except (ValueError, TypeError, RecursionError):
+            return ActionResult(False, "Tool arguments must be a JSON object of at most 256 KiB.", error="invalid_arguments")
 
         if self.permissions.stopped and request.tool not in {"system.resume", "system.status"}:
             result = ActionResult(False, "Aeris is stopped. Say 'resume Aeris' first.", error="kill_switch")
@@ -110,6 +122,18 @@ class ToolRegistry:
                 self.audit.write("tool_rejected", request=self._audit_request(request), reason=result.error)
                 return result
 
+        if spec.prepare is not None and not self.dry_run:
+            try:
+                if token:
+                    token.raise_if_cancelled()
+                prepared = spec.prepare(dict(arguments), token=token)
+                if isinstance(prepared, ActionResult):
+                    return prepared
+                arguments = spec.model.model_validate(prepared).model_dump(mode="json", exclude_none=True) if spec.model else prepared
+            except CancelledError:
+                raise
+            except Exception:
+                return ActionResult(False, "A current target preview could not be prepared. No action was taken.", error="preparation_failed")
         request = replace(request, arguments=dict(arguments))
         approved_fingerprint = request.fingerprint()
         if token:
@@ -154,6 +178,8 @@ class ToolRegistry:
                 result = spec.handler(dict(arguments), token=token)
             else:
                 result = spec.handler(dict(arguments))
+        except CancelledError:
+            result = ActionResult(False, "Operation cancelled.", error="cancelled")
         except Exception as exc:  # defensive boundary around OS integrations
             result = ActionResult(False, f"{request.tool} failed safely.", error=str(exc))
         self.audit.write(

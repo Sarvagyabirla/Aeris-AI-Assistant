@@ -4,6 +4,7 @@ import time
 from io import BytesIO
 
 from ..models import ActionResult
+from ..state import CancelledError
 
 
 class ScreenVision:
@@ -42,6 +43,7 @@ class ScreenVision:
                 error="missing_dependency",
             )
 
+        client = None
         try:
             if token:
                 token.raise_if_cancelled()
@@ -67,12 +69,19 @@ class ScreenVision:
                     types.Part.from_bytes(data=buffer.getvalue(), mime_type="image/jpeg"),
                 ],
             )
+            if token:
+                token.raise_if_cancelled()
+        except CancelledError:
+            return ActionResult(False, "Screen analysis cancelled; late model output discarded.", error="cancelled")
         except Exception:
             return ActionResult(
                 False,
                 "Aeris could not understand the screen. Check the internet connection and Gemini configuration.",
                 error="screen_vision_failed",
             )
+        finally:
+            if client is not None:
+                client.close()
 
         answer = (response.text or "").strip()
         if not answer:

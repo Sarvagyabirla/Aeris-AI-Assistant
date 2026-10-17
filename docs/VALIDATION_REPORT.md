@@ -1,195 +1,151 @@
-# Validation report — 12 October 2026
+# Validation report - 17 October 2026, connected companion increment
 
-## Native cancellation and Qt lifecycle continuation (latest)
+Actual repository: `AERIS_AI_ASSISTANT/Aeris`; branch `fix/responsive-aeris-desktop`; HEAD
+`e97687470b46e0c2f9030b331de17df33d9ff903` plus preserved pre-existing/current uncommitted work.
+Baseline: **356 passed, 1 skipped**. Final: **395 passed, 1 skipped,
+0 failed**, pytest console 12.21 s (JUnit suite 12.018 s). The sole skip is
+`tests/test_settings_lifecycle.py:183`: Windows symlink creation needs Developer Mode or elevated
+privileges. It was not hidden or removed. Two formerly unsupported valid compound examples
+were moved out of the unsafe-command corpus and replaced by positive production-controller
+coverage; negation/invalid quantity/unsupported compound coverage remains.
 
-Nested root/HEAD/branch unchanged; pending previous increment retained; no user-data or secret reads.
-Baseline rerun: **161 passed, 1 skipped**, 1.87 s; clean Ruff. Same existing Windows Python 3.11.9
-environment. Three new native regressions failed before repair (0.24 s) and pass after repair.
+Environment: Windows build 26200, existing Python 3.11.9 child .venv, Pydantic 2.13.5,
+PySide6 6.11.2, pytest 9.1.1, Ruff 0.16.5, psutil 7.2.2. No environment replacement,
+installation, model download, real credential use, personal-window capture, native typing,
+volume/display change, mail, UAC/install, power action, generated-project execution, commit or
+push occurred. Native API export introspection did not invoke a window. Real device/account
+acceptance and remote CI are NOT RUN. Linux/other Python versions were not run locally.
 
-| Issue | Production change / deterministic evidence | Real acceptance |
+## Actual repaired/connected evidence
+
+| Boundary | Reproduction / implementation | Final evidence |
 |---|---|---|
-| Tokenless winget/Defender | process_runner.py, packages.py, downloads.py; cancelled tokens launch neither; real harmless Python child cancellation/timeout reaped; output capped at 1024 fixture bytes | No winget install or Defender scan run |
-| False verified install | Separate winget exact-list observation; fake missing presence returns installation_unverified | Package version/publisher still incomplete; no install |
-| Late download publication/scan | Atomic token commit; post-publication cancellation reports retained artifact; scan token passed | Network read/DNS cancellation still incomplete |
-| Blocking settings | SettingsApplyWorker; slow fake cleanup/apply runs while Qt pumps; failed catalog preparation preserves old registry/config and no settings write | Supervised settings/credential backend not run |
-| Blocking/repeated close cleanup | CleanupWorker owns one cleanup attempt; slow fixture runs off GUI, repeated close does not duplicate; voice restarts invalidated on close | Real cold-ASR and native shutdown not tested |
-| Follow-up make it 40 | followup.py + real controller; volume reference/expiry/intervening task/out-of-range/Stop scenarios pass | Real ASR not run; only absolute volume/brightness numeric follow-up |
-| Stop contract mismatch | Task cancellation clears task/follow-up; Emergency Stop calls authoritative PermissionEngine and requires resume | UI hardware Stop timing not measured |
+| Existing critical bugs | P0 negation/quantities/patch commit/effect reporting repairs already present in baseline | Existing real registry/controller/Qt regressions preserved and pass |
+| Compound tasks / JSON dependencies | Initial new set: 3 failed, 6 passed | Whole-plan static preflight, actual output refs, no invalid partial effects; exact 50/20 and Notepad/35/selected minimize fixtures |
+| Missing companion | Initial 2 Qt failures | One controller/model across both views; Stop retains effects; non-activating flags, recovery gate, hidden/reduced animation |
+| Missing organization workflow | Initial 3 failures | One exact batch approval, bounded file hashes/identities, changed-content/collision denial, retained Stop manifest and Undo conflict refusal |
+| Routines/scopes/modes | Connected actual Qt review/save/run/disable and revoke flows | Scope/catalog/mode/category changes invalidate review; restart denials; Assist/Trusted context tests |
+| New SQLite ownership | Offscreen screenshot initially failed Windows temp cleanup due open database handles | New stores close each connection explicitly; capture/cleanup and live-object rename fixture pass |
+| Native window wrapper gap | Installed win32gui lacks ShowWindowAsync and IsZoomed despite mocked tests passing | Replaced with typed user32 exports; actual export-presence check + registry fake native postconditions; no user-window invocation |
+| Durable effects | Journal failure and interrupted-owner fixtures | Retained visible artifact receipts, blocked later work when durable logging fails, no automatic restart replay |
 
-Full suite: **173 collected, 172 passed, 1 skipped**, 2.79 s. Skip: Windows symlink privilege
-(`test_settings_lifecycle.py:183`); junction fixture retained. Ruff, compileall, git diff --check pass
-(LF/CRLF advisories only). Focused native/process/Qt tests: 12 passed in 1.36 s before later tests.
-No dependency install, real network/model, device modification, sensitive capture or external send.
-Qt/Python/psutil official threading/process references consulted; no new dependency introduced.
+Commands from the nested Aeris folder (all final checks exit 0):
 
-Screenshot `evidence/native-lifecycle-desktop.png` is a sanitized real-widget simulation screenshot,
-not live device acceptance. 30 warm simulated-controller trials: p50 **5.940 ms**, p95 **7.126 ms**,
-0 failures; raw samples `evidence/native-lifecycle-local-warm.json`. Construction single sample 3.789 ms.
-This does not measure audible speech, capture, GUI acknowledgment or external task quiescence.
+```powershell
+.\.venv\Scripts\python.exe -m pytest -ra --junitxml=docs/evidence/companion-tests.xml
+.\.venv\Scripts\python.exe -m ruff check .
+.\.venv\Scripts\python.exe -m compileall -q aeris scripts
+.\.venv\Scripts\python.exe -m aeris --self-test
+.\.venv\Scripts\python.exe test_ui_manual.py
+.\.venv\Scripts\python.exe -m scripts.measure_local --output docs/evidence/companion-controller.json
+```
 
-### Acceptance matrix updates (other rows retain the earlier incomplete/not-run status)
+[Junit results](evidence/companion-tests.xml), [machine-readable validation](evidence/companion-validation.json),
+[wheel report](evidence/companion-wheel.json). Offline self-test reports presence/catalogs/local route,
+not actual device/model/account readiness. The isolated manual Qt fixture uses temporary config and
+fake effects. New CI ui-offscreen job is added; remote CI has not run. Windows-only organization
+fixtures explicitly skip on non-Windows; a separate portable-adapter rejection test exists.
 
-| Scenario | Current implementation / fixture | Real device | Timing |
-|---|---|---|---|
-| Stop during package/scan | Cooperative owned-process boundary PASS; detached installers uncertain | NOT RUN | 20 ms poll interval, cleanup waits bounded in code; no device latency measurement |
-| Follow-up make it 40 | Connected absolute-control context PASS | NOT RUN | Not measured |
-| Close/reopen busy and settings | Off-GUI owned cleanup/settings slow-fixture PASS; failure keeps window | NOT RUN | Not measured |
-| Installer verification | Defender must pass; token checks; package presence observed | NOT RUN | Not measured; exact approved hash/signer incomplete |
+Source wheel built with `pip wheel . --no-index --no-deps --no-build-isolation --wheel-dir <temp>`.
+`python scripts/check_wheel.py <wheel>` extracts/imports core and optional UI modules from another
+cwd under `python -I`, checks catalogs and excluded runtime/credential artifact names. SHA256:
+`422eec158b22390cfc456e1a500de5e9c59a3d7aa63f05e5d1620c6822ac8218`. No excluded entries; import/self-test exit 0. No PyInstaller/frozen executable exists.
+A source-archive roundtrip was not repeated in this increment; the previous result is historical.
 
-Commands: existing interpreter `-m pytest -ra`, `-m ruff check .`, `-m compileall -q aeris`;
-`git --no-pager diff --check`; measurement/capture scripts with output destinations above.
-No executable build: PyInstaller remains absent; clean-account frozen acceptance incomplete.
+Known-key/private-key pattern scan: **131 changed text files,
+0 candidate files**; ignored personal runtime files were not inspected. This is a bounded pattern
+scan, not proof that every possible secret format is absent. Wheel checks are separate from a full
+signed/attributed frozen-release audit. Existing MIT/license data was preserved.
 
-## Follow-on local increment (current evidence; preserves earlier report below)
+## Synthetic UI and performance
 
-Baseline HEAD `6b22de3d6624ea2ad5aa58de0cc0edc00ff1907d`, branch
-`fix/responsive-aeris-desktop`, clean worktree, nested root confirmed with git rev-parse.
-No AGENTS.md found in parent/project. Existing `.venv\Scripts\python.exe`: Python 3.11.9,
-Windows 10.0.26200, Pydantic 2.13.5, PySide6 6.11.2, pytest 9.1.1, installed Ruff 0.16.5,
-google-genai 2.22.0. No dependencies installed or environment replaced.
+[Dashboard 1280x720](evidence/companion-dashboard-1280.png),
+[1920x1080](evidence/companion-dashboard-1920.png), [floating view](evidence/companion-floating.png),
+[Tasks builder](evidence/companion-tasks.png), [Permissions](evidence/companion-permissions.png),
+Qt scales [125%](evidence/companion-scale-1.25.png), [150%](evidence/companion-scale-1.5.png),
+[200%](evidence/companion-scale-2.png). Dashboard, floating, permissions and 200% captures were
+visually inspected. They show real widgets with disposable simulation data, not live desktop
+capture. No physical display resolution was changed. Full physical focus/DPI/keyboard/disconnect
+acceptance remains NOT RUN. Some earlier captures predate the last small control/text adjustment;
+no screenshot is offered as evidence of native desktop control.
 
-Baseline: 142 passed, 1 skipped (143 collected), 1.62 seconds; Ruff and offline diagnostics passed.
-Six newly added regressions failed before repair in 0.39 seconds:
-generation/repair cancelled by model still opened published project (2); changed region/expiry
-reused tool-name grant; settings reset global stop; native PortAudio import escaped; arbitrary
-private audit markers persisted. These tests use the real registry/controller boundaries and fakes.
+30 warm simulated controller trials: median **14.862 ms**, p95 **20.002 ms**, routing p95
+0.111 ms, 0 failures. One construction sample: 15.952 ms. [Raw trials](evidence/companion-controller.json).
+This includes durable journal overhead and is slower than the previous increment's 5.574/6.646 ms
+median/p95. It is not a GUI, Stop, speech or real device latency measurement. Character rendering
+has a 30 fps timer cap, disabled in reduced motion and hidden/minimized views; real CPU/performance
+cost remains unmeasured. Individual acceptance-scenario timings below are NOT MEASURED.
 
-| Repair / connected addition | Changed files | Evidence |
+## Eight required connected demonstrations
+
+| # | Fixture result | Real-device result / unfinished work |
 |---|---|---|
-| Cancellation-before-publication, repair and staging; honest after-publication outcome | coding.py, state.py | Provider cancels during generation/repair: no project/editor; staging removed; post-publish result includes existing artifact; expired deadline blocks commit |
-| Exact expiring session capture scope, invalidated confirmation | permissions.py | Region A/B gives two prompts; expiry re-prompts; stop/resume during confirmation denies |
-| Global Stop survives settings and blocks planner entry | assistant.py | Real settings apply remains stopped; next local command denied |
-| Strict saved types/recovery without deleting original | config.py, desktop.py | Invalid booleans, numeric bool, roots list and device preserved; simulation/AI off/no roots; recovery banner |
-| Metadata-only audit | audit.py | Unique private path/result/error/custom markers absent from actual persisted JSONL; safe tool/status retained |
-| Separate coding cloud consent | registry.py | Denied sharing invokes no handler/model; explicit preview discloses generation/one repair |
-| Broken native audio runtime | voice.py, regression.yml | Injected OSError becomes VoiceUnavailableError; Ubuntu audio job installs libportaudio2; remote CI not run |
-| Verified speech summary | models.py, desktop.py | Failure spoken instead of planner promise; simulation speech explicitly says no changes |
-| Real Daily Brief retrieval | assistant.py, desktop.py | Two authorized fake adapters return grounded event/mail metadata; denial/simulation fetch nothing; no planner/send path; malicious snippet does not become an action |
-| Local conversation view | ui/memory_view.py, desktop.py | Qt event loop inspects and forgets chosen temp record; correction uses existing validated store API |
+| 1 normal launch, character/controller, saved mic/mode | PASS: isolated Qt controller/preferences/character code | NOT RUN normal user shortcut; first-run onboarding incomplete |
+| 2 dashboard/companion during task, Stop, focus | PASS: same model/worker, Stop, retained results and non-activating flags | NOT RUN physical focus/tray/hotkeys |
+| 3 offline Notepad, volume 35, minimize selected window | PASS: exact typed three-step goal through registry with fake app/volume/native window | NOT RUN speech/actual apps/audio/window; selection required |
+| 4 additional-drive documents, single batch, Undo, revoke | PASS: arbitrary disposable root, actual fixture file moves/Undo/conflicts/restart revoke | NOT RUN additional physical drive; Windows hard links needed |
+| 5 selected error screen, grounded assistance, code preview/apply/check | NOT IMPLEMENTED end-to-end | Screen selector/redaction/sharing, multi-file review/check workflow missing |
+| 6 reviewed study/coding routine, apps/project/control/reminder | PASS local subset: review/save/run/disable app/control/reminder | Project/coding template and real voice/app check unfinished; no automatic triggers |
+| 7 Gmail reply draft or install plan, exact final approval/denial | NOT IMPLEMENTED full draft/immutable install-plan workflow; existing approval denial fixtures PASS | NOT RUN accounts/UAC; missing code remains explicit |
+| 8 Stop long task during speaking, retain effects, responsive UI | PASS: owned speech/cancel and Qt shared-worker/effect receipt fixtures | NOT RUN actual microphone/SAPI/acoustic interruption/quiescence |
 
-Final local checks: **162 collected, 161 passed, 1 skipped**, 1.89 seconds. Skip unchanged:
-Windows symlink creation needs Developer Mode/elevation (`test_settings_lifecycle.py:172`).
-Existing Windows junction fixture passes. No blanket voice exclusion. Ruff and compileall passed;
-git diff --check passed apart from LF/CRLF advisory. --help flags unchanged and verified;
---self-test passed from TEMP, without device/account/model/network probing.
+All eight individual timings: NOT MEASURED. No fixture is labeled device-verified.
 
-30 warm simulated production-controller trials: p50 5.758 ms, p95 6.836 ms, 0 failures.
-Raw data: `evidence/phase1-local-warm.json`. Real-widget screenshot generated and visually inspected:
-`evidence/phase1-desktop-fixture.png`; SIMULATION, result, controls, Local memory tab visible.
-Font/size-hint warnings printed by offscreen Qt, but screenshot rendered legibly.
-First benchmark/screenshot invocation omitted required output arguments and failed; rerun with
-`--output` / destination succeeded. These invocation failures are not hidden as successful trials.
+## Complete required acceptance matrix
 
-Official sounddevice installation reference checked: Linux may need separate PortAudio package.
-Official Google Gen AI client-lifecycle documentation checked; installed Client.close exists and
-generation now closes its client in finally. No model IDs/dependencies replaced.
+NOT IMPLEMENTED means missing workflow code. NOT RUN means unperformed acceptance of a stated
+boundary. IMPLEMENTED (partial/foundation) is explicitly limited by the final column.
 
-### Required scenario matrix — current evidence, not a completion claim
+| Scenario / required outcome | Implementation | Fixture result | Real device/account | Timing | Remaining limitation |
+|---|---|---|---|---|---|
+| Open application with existing config - UI usable automatically; no surprise listening/upload/live mode | IMPLEMENTED | PASS: isolated Qt auto-controller, view/mic preference fixtures | NOT RUN | NOT MEASURED | Normal shortcut/native first-run onboarding NOT RUN; onboarding incomplete |
+| Dashboard/companion switching during a task - One controller, real animated state, focus preserved, Stop available in both views | IMPLEMENTED | PASS: same worker/model, Stop and retained result in both views | NOT RUN | NOT MEASURED | Non-activating flags verified; actual focus/drag/tray/DPI NOT RUN |
+| PC-wide scope on an additional approved drive - Relevant requested access works; revocation and protected-target checks are enforced | IMPLEMENTED | PASS: arbitrary selected-root fixture, revocation/category denial and restart | NOT RUN | NOT MEASURED | Fixture uses a disposable local folder, not another physical drive; cross-process revocation unproven |
+| One goal across multiple supported applications - Validated output references, correct target focus and verified per-step effects without repeated next prompts | IMPLEMENTED | PASS: actual JSON refs and offline three-step goal through registry | NOT RUN | NOT MEASURED | App/volume/window native effects are fakes; semantic app controls and general replanning incomplete |
+| Trusted routine changes its account/target/effect - Old grant cannot authorize changed scope; consequential actions await fresh approval | IMPLEMENTED (partial) | PASS: changed roots, app catalog, mode and categories invalidate reviewed routine | NOT RUN | NOT MEASURED | Account/effect workflows outside local allowlist NOT IMPLEMENTED; no account review is claimed |
+| "Don't set volume to 100" / quoted/conditional command - No volume effect and no cloud fallback that disregards negation | FIXTURE_VERIFIED | PASS: router/controller no action or cloud fallback | NOT RUN | NOT MEASURED | Actual desktop volume effect was never invoked |
+| Negative, decimal, out-of-range or mixed quantities - Defined validation/clarification; no silent sign/decimal loss | FIXTURE_VERIFIED | PASS: strict integral 0-100 parsing; no invalid partial compound effect | NOT RUN | NOT MEASURED | Decimal semantics deliberately rejected; ASR uncertainty remains |
+| "Set volume to 50 and brightness to 20" - Both intended steps or a clear clarification; no silent partial execution | FIXTURE_VERIFIED | PASS: exact volume 50 and brightness 20 both execute via production controller with fake native effects | NOT RUN | NOT MEASURED | Real audio/display effects NOT RUN |
+| Repeated pause/mute/unmute - Absolute desired state where supported; never a mislabeled toggle | IMPLEMENTED (partial) | PASS: mute/unmute idempotence; pause fails explicitly rather than toggling | NOT RUN | NOT MEASURED | Absolute selected-session play/pause NOT IMPLEMENTED |
+| Offline: volume 35, brightness change, pause media, open Notepad - Deterministic local path; no cloud/Ollama dependency; verify effect where supported | IMPLEMENTED (partial) | PASS: deterministic local controls and selected-window three-step goal with fake adapters | NOT RUN | NOT MEASURED | Absolute pause unsupported; voice and real devices NOT RUN |
+| Say a tested English/Hinglish variation - Correct local action or brief clarification; no dangerous guessing | FIXTURE_VERIFIED | PASS: existing English/Hinglish local corpus | NOT RUN | NOT MEASURED | Real microphone/recognition accuracy NOT RUN |
+| "Okay, Aeris, open YouTube" via hands-free and text - Consistent addressed-speech handling with no false wake matches | IMPLEMENTED | PASS: shared configured addressed-speech grammar and text/PTT fixtures | NOT RUN | NOT MEASURED | Trained wake detector/multi-alias onboarding NOT IMPLEMENTED; real ASR NOT RUN |
+| Stop during TTS, model load, code generation, download, package work - Honest acknowledgment and bounded cleanup; no unpublished late write | IMPLEMENTED | PASS: owned speech/Qt cancellation, native subprocess descendants, generation/download/package mocks | NOT RUN | NOT MEASURED | Acoustic interruption, actual SAPI/UAC/network/model quiescence NOT RUN; native waits remain |
+| Stop during existing-file patch final checks - No publication after cancellation wins the commit gate | FIXTURE_VERIFIED | PASS: real registry cancellation during final existing-file checks keeps original bytes | NOT RUN | NOT MEASURED | Hostile external filesystem races not fully closed |
+| Stop after a write/install may have occurred - Retained artifact/uncertain effect remains visible; stale speech suppressed | FIXTURE_VERIFIED | PASS: retained patch/copy/download/batch/typing receipts and no stale task speech | NOT RUN | NOT MEASURED | Real install/send uncertainty untested; all secondary storage-failure paths need further audit |
+| Follow-up: "make it 40" - Bound to the recent correct task; expired/ambiguous context asks for clarification | FIXTURE_VERIFIED | PASS: recent successful absolute control context and expiry | NOT RUN | NOT MEASURED | Generic observed-choice/project follow-ups NOT IMPLEMENTED |
+| Screen help with no prior scope - Selector and preview; no capture/upload before approval | MISSING | NOT IMPLEMENTED end-to-end | NOT RUN | NOT MEASURED | Selected-window/region selector, crop/redaction/preview and sharing workflow missing; no-scope path fails closed |
+| Model/CLI JSON region array - Strictly validated compatible scope, not tuple_type failure | FIXTURE_VERIFIED | PASS: serialized JSON region array through strict registry | NOT RUN | NOT MEASURED | No capture/upload or device interaction performed |
+| Screen help after changing region/window - Fresh scope approval; old tool-name grant cannot authorize it | IMPLEMENTED (partial) | PASS: exact region fingerprint/expiry denies changed supplied scope | NOT RUN | NOT MEASURED | Selected window/DPI/destination UI and observation freshness NOT IMPLEMENTED |
+| Browser fixture with moving/replaced target - Reobserve/reauthorize; do not act on same-URL stale approval | MISSING | NOT IMPLEMENTED end-to-end | NOT RUN | NOT MEASURED | Same-URL DOM identity, changed-target reauthorization and peer enforcement unfinished |
+| Two-step browser/download task - Consume actual outputs and verify final artifact; never guess URL/path | IMPLEMENTED (foundation) | PASS: generic declared-output dependency fixture; browser/download end-to-end NOT IMPLEMENTED | NOT RUN | NOT MEASURED | Actual observed browser/download producer-consumer and local DOM/HTTP acceptance remain |
+| Find and install a test package - Preview exact package, honor UAC, verify actual presence; automated tests are mocks | IMPLEMENTED (partial) | PASS: existing fake owned process/presence/cancellation fixtures | NOT RUN | NOT MEASURED | Exact observed version/publisher/hash/signer/install plan incomplete; real UAC/install NOT RUN |
+| Generate/repair fixture project - Staged validated diff/project, safe commit, optional authorized checks, explicit Undo | IMPLEMENTED (partial) | PASS: existing generated/single-file fixture and commit cancellation | NOT RUN | NOT MEASURED | Multi-file diff/check authorization/transactional Undo/project continuation NOT IMPLEMENTED |
+| Organize fixture Downloads - Preview and approved move plan, collision handling, Undo without overwriting newer edits | IMPLEMENTED | PASS: one reviewed hash/identity-bound batch, collision/changed bytes, Stop receipts and newer-edit-safe Undo | NOT RUN | NOT MEASURED | Windows hard links; disposable temp folder only; actual Downloads/additional-drive test NOT RUN; no full atomic rollback |
+| Reminder across app restart/sleep - Durable local event, no duplicate notification, explicit overdue behavior | IMPLEMENTED | PASS: durable local/fake-clock restart/overdue/recurrence/duplicate-claim and Qt notices | NOT RUN | NOT MEASURED | Needs running LIVE app; broad DST/crash/sleep/closed-app delivery unproven |
+| Run study-mode routine - Authorized bounded low-risk steps, progress, Stop and error recovery | IMPLEMENTED (local subset) | PASS: Qt review/save/run/disable; app/control/reminder through one executor | NOT RUN | NOT MEASURED | Configured project/meeting/coding templates, automatic triggers and real voice/app checks unfinished |
+| Daily Brief with fake email/calendar - Summarize fetched records with provenance; drafts never auto-send | IMPLEMENTED (partial) | PASS: fetched fake Gmail/Calendar provenance and local reminders; no send | NOT RUN | NOT MEASURED | Account identity/setup, rich project agenda and reviewable reply drafts incomplete |
+| Deny/cancel/stale approval - No provider call, write, capture, or external action under denied scope | IMPLEMENTED | PASS: exact scope/cancel/expired approval, cloud no-call, category denial before preparation and stale target fixtures | NOT RUN | NOT MEASURED | Full account/browser/screen observation boundaries unfinished |
+| Credential store unavailable or settings invalid - Clear recovery, no plaintext fallback, no silent live mode | FIXTURE_VERIFIED | PASS: keyring/env/recovery journal and safe current/restart/CLI paths | NOT RUN | NOT MEASURED | Actual credential backend failure NOT induced; malformed new-store recovery needs more work |
+| Close/reopen during busy work - Responsive lifecycle, no orphan workers/processes or stale effects | IMPLEMENTED | PASS: owned Qt workers, async settings/cleanup, shared companion/controller and local restore socket | NOT RUN | NOT MEASURED | Native focus/tray/session stress and cold-ASR lifecycle NOT RUN |
+| Cleanup failure / keyring unavailable / interrupted settings save - Usable retry/recovery, preserved data and effective configuration | FIXTURE_VERIFIED | PASS: explicit cleanup Retry, provider/TTS ownership, credential rollback and preserved settings fixtures | NOT RUN | NOT MEASURED | Real COM/native stress NOT RUN; cross-process settings/full power-loss durability unproven |
+| Built-in System Health and Network Test - Available deterministic workflows without needing a model to invent tools | FIXTURE_VERIFIED | PASS: deterministic routes; explicit network denial/cancel and fake bounded probe | NOT RUN | NOT MEASURED | No actual remote probe performed |
+| Reply-only explanation versus failed planner in CLI - Correct distinct structured status and exit code | FIXTURE_VERIFIED | PASS: actual CLI structured success/failure exit behavior | NOT RUN | NOT MEASURED | No real provider request performed |
+| Optional specialist app absent/present - Honest readiness, supported typed actions and separate real-app acceptance | MISSING | NOT IMPLEMENTED specialist workflows; catalogs only launch apps | NOT RUN | NOT MEASURED | Typed/versioned Office/Blender/Resolve/FL/ML/Git adapters incomplete; real apps/SDKs NOT RUN |
+| Frozen app from another cwd - Launch/resources/settings work; optional unavailable services degrade clearly | MISSING | NOT IMPLEMENTED frozen executable; wheel import/resource check PASS | NOT RUN | NOT MEASURED | PyInstaller absent; pinned freeze/resources/native imports/clean-account acceptance incomplete |
 
-Real-device checks below are **NOT RUN: supervised explicit authorization required**. Packaging
-also cannot be exercised in the current interpreter without reviewed PyInstaller setup.
-Only controller fixture timing is measured; scenario/device timings are NOT MEASURED.
+## Remaining release and workflow limits
 
-| Scenario | Implementation / fixture result | Real-device result / remaining limitation |
-|---|---|---|
-| Open existing config | Qt dispatch/close fixture PASS; mode/listening preferences preserved | NOT RUN; full onboarding missing |
-| Offline volume/brightness/pause/Notepad | Existing local route fixtures PASS | NOT RUN; media absolute-state/postconditions incomplete |
-| English/Hinglish | Existing router fixtures PASS | NOT RUN; confidence/ambiguity ASR incomplete |
-| Stop TTS/model/code/download/packages | Code generation/repair/staging + owner-TTS fixtures PASS | NOT RUN; network load/download/winget/scan quiescence remains incomplete |
-| Follow-up make it 40 | NOT IMPLEMENTED as task-bound context | NOT RUN |
-| Screen no prior scope | Guard PASS, selector/preview NOT IMPLEMENTED | NOT RUN; cannot claim connected screen help |
-| Screen changed region/window | Exact-region permission regression PASS | NOT RUN; window identity/preview missing |
-| Browser replaced target | Existing URL/uniqueness fixtures only | NOT RUN; same-URL DOM identity incomplete |
-| Browser/download prior outputs | Typed output-reference executor NOT IMPLEMENTED | NOT RUN |
-| Find/install package | Existing adapter fixtures only | NOT RUN; cancellable owned processes/verified presence incomplete |
-| Generate/repair project | Syntax validation + publication cancellation PASS | NOT RUN; transactional diff/authorized checks/Undo incomplete |
-| Organize Downloads | Reviewable organization/Undo NOT IMPLEMENTED | NOT RUN |
-| Reminder restart/sleep | Durable scheduler NOT IMPLEMENTED | NOT RUN |
-| Study routine | Persisted typed routine workflow NOT IMPLEMENTED | NOT RUN |
-| Daily Brief fake mail/calendar | Connected bounded metadata retrieval PASS | NOT RUN; reminders/account display/drafts incomplete |
-| Deny/cancel/stale approval | Scope/denied-cloud/no-late-publish fixtures PASS | NOT RUN; native adapters not universally cancellable |
-| Invalid settings/credentials | Typed recovery + existing fake-keyring tests PASS | NOT RUN; startup credential-failure recovery UI incomplete |
-| Close/reopen busy | Existing Qt worker cancellation/close PASS | NOT RUN; settings/cleanup joins need asynchronous redesign |
-| Frozen different cwd | Source diagnostics/resources PASS | NOT BUILT: PyInstaller absent; executable acceptance outstanding |
+All eleven phases remain in REQUIREMENTS_TRACEABILITY. Selected-screen preview/watch, semantic
+UI Automation/guarded visual control, browser DOM/peer enforcement, immutable installer approval,
+account-specific Gmail drafts/OAuth, voice onboarding/device/acoustic interruption, multi-file
+coding/checks/Undo, broader projects/routine triggers, specialist adapters, unified locks and a
+verified frozen executable remain unfinished code. Native microphone/SAPI, actual user apps,
+physical additional drive/DPI/focus, OAuth and UAC are separate supervised checks after code exists.
+No whole phase or full master-prompt completion is claimed. Exact next work: CONTINUATION.
 
-### Commands actually executed
-
-From project root with existing interpreter: `-m pytest -ra`, `-m ruff check .`,
-`-m compileall -q aeris`, `-m aeris --help`, `git diff --check`;
-`scripts/measure_local.py --trials 30 --output docs/evidence/phase1-local-warm.json`;
-`scripts/capture_fixture_ui.py docs/evidence/phase1-desktop-fixture.png`.
-From TEMP: absolute interpreter `-m aeris --self-test`.
-No real sends, installs, account access, microphone capture, screen capture or device changes.
-
-## Scope/environment
-
-Actual nested Git root confirmed with `git rev-parse --show-toplevel`; starting commit
-`bec9ca9b37c67a80b7f0d35bd70b012b4ed726fc`. Initial status clean. No AGENTS.md files found under the workspace/project.
-Existing interpreter: `C:\AI Related project BY AI\AERIS_AI_ASSISTANT\Aeris\.venv\Scripts\python.exe`.
-Python 3.11.9 / Windows `10.0.26200`; Intel i7-13650HX, 14 cores/20 logical processors,
-25,534,783,488 bytes installed RAM. Pydantic 2.13.5, Qt/PySide6 6.11.2, pytest 9.1.1.
-Tests used temporary runtime data, fake providers/audio/browser/credential adapters, and Qt offscreen widgets.
-No real mail, install, cloud request, microphone capture or volume/brightness change was performed.
-
-## Baseline and reproductions
-
-- Read dependency/setup/build files, CLI, desktop/voice/TTS paths, assistant routing, permission/registry boundary, memory/audit, schemas, browser, coding, both planners and existing tests.
-- Production path: desktop bounded queue -> assistant local route -> optional planner -> registry validation -> PermissionEngine -> handler -> ActionResult renderer -> Qt transcript -> speech owner.
-- Original voice preload test could load/download a real model. Mocked its loader before baseline execution; no test exclusion was used.
-- Baseline: **97 collected, 96 passed, 1 failed**, 4.12 s; Ruff passed.
-  `test_voice_silence_detection` failed after cancellation during first optional imports was cleared by capture startup.
-- Added eight foundation reproductions: **8 failed**, 0.30 s before repair.
-
-| Issue | Reproduction / changed files | Automated evidence | Real Windows acceptance |
-|---|---|---|---|
-| Duplicate memory startup / repeated commands | Legacy duplicate roles/timestamps; memory.py | Repeated initialization preserves ordered rows; repeated content retained | SQLite exercised on Windows temp files, not user's DB |
-| Sensitive persistence | Unique marker raw SQL read; memory.py | SENSITIVE/DO_NOT_STORE omitted on add | Existing historical sensitive rows preserved, not automatically deleted |
-| Cloud history leak / current request consent | assistant.py, memory.py | Actual fake Gemini generate_content serialization excludes private markers; denial invokes no provider | Live provider/account not tested |
-| Effective mode / CLI | config.py, cli.py, assistant.py, desktop.py | Save/reload, explicit --live/--simulate, fixture side effect after settings apply | Effective label asserted in real Qt widgets |
-| Plaintext credentials | secrets.py/config.py | Fake credential store migration/removal; no marker in JSON | Actual Windows Credential Manager writes not tested |
-| Validation/approval | schemas.py/registry.py | Boolean volume rejection, JSON URL/default serialization, changed approval arguments cannot execute | Consequential real actions not used |
-| Plans and visible results | planning.py, both planners, assistant.py | Oversized/malformed/unknown actions reject; calendar selection/fallback; required failure halts; three renderers | Provider planning only fixture-tested |
-| Browser startup hangs | browser_advanced.py | Startup crash returns useful error in <1 s; exact/subdomain/port/local rules | No Chromium launch/navigation acceptance yet |
-| File search/patch | coding.py | Hash/empty/ambiguous/stale patch checks; CRLF preserved; bounded search implementation | Symlink test skipped: Developer Mode/elevation unavailable; Windows junction fixture passed; TOCTOU not covered |
-| Voice cancellation/test hygiene | voice.py/test_voice.py | Cancel-before-start, capture cancellation; preload mocked; CUDA generator failure retries once on CPU int8 | Audio device/quality unavailable as acceptance evidence |
-| Worker lifecycle | desktop.py | Real Qt event loop: queue-full, stale approval, Stop wait release, simulated text command, clean close | Offscreen, not global shortcuts/tray/interactive hardware |
-| TTS ownership | tts_worker.py | Engine/COM fixture verifies operations all on owner thread | Installed SAPI voice playback/Stop latency not tested |
-| Release entrypoint | cli.py, diagnostics.py, BUILD_AERIS.bat, run_aeris.py | --help and --self-test checked from another cwd; no pytest invocation in diagnostics | Build not run: PyInstaller absent; executable launch not verified |
-| Windows resource cleanup | memory.py | First benchmark failed with WinError 32 from open SQLite connections; explicit close fixed; benchmark rerun succeeded | Real Windows file handles exercised |
-| Screen upload scope | screen_vision.py/schemas.py | No-key guard retained; explicit region required, monitor fails closed | Selected-window/crop/preview not implemented, A4 not ready |
-
-## Final checks (update if further edits change results)
-
-- `python -m pytest -ra`: **143 collected, 142 passed, 1 skipped**, 1.83 s at the final regression run.
-- Skip: `test_search_symlink_outside_workspace_is_not_read` — Windows symlink creation requires Developer Mode or elevation.
-- `python -m ruff check .`: passed.
-- `git diff --check`: passed (Git reports LF/CRLF normalization warnings only).
-- `python -m aeris --help`: confirms --simulate / --live / --self-test; no --benchmark advertised.
-- `python -m aeris --self-test` from `%TEMP%`: local route/catalog/package presence passed; no models/devices/network inspected.
-- `scripts/measure_local.py`: 30 warm controller trials, no failures; raw samples in `evidence/local-warm.json`.
-- `scripts/capture_fixture_ui.py`: real Qt widgets screenshot in `evidence/desktop-fixture.png`;
-  inspected after loading installed Windows fonts. The offscreen plugin printed harmless font-directory/size-hint warnings.
-  Screenshot shows simulation result, effective mode, model-not-loaded status, text input, Stop and voice controls.
-  It is **not a screenshot of a successful real microphone or live Notepad action**.
-- New CI definitions provided, not executed remotely in this session.
-
-## Remaining acceptance: do not equate incomplete work with an external blocker
-
-A1–A3/A11: real desktop/microphone/SAPI interaction requires interactive human acceptance; first-use onboarding,
-VAD activation, quiet playback capture, full adapter cancellation and tray remain implementation work.
-A4: blocked by missing crop/preview/window scope implementation, not by an account alone.
-A5: browser runtime/local fixture acceptance not performed; DNS/private-network and DOM identity work remains.
-A6: staged diff/check/Undo production workflow not implemented; single-file patch guard only.
-A7–A8: durable project records UI, reminders and routines incomplete.
-A9: no designated accounts were configured; Daily Brief retrieval/draft follow-up workflow also incomplete.
-A10: existing download/package tests retained; cancellation/installer completion acceptance remains.
-A12: PyInstaller not installed in existing project environment; build/frozen-launch verification outstanding.
-
-### Simple remaining user-device checks (only after associated implementation is ready)
-
-1. Open START_AERIS.bat; verify SIMULATION, type `open notepad`, and confirm wording says “would execute”.
-2. Enable hands-free intentionally in Settings; use a harmless addressed phrase and verify Heard transcript.
-3. Use push-to-talk/mute/Stop; test actual voice playback, speakers self-trigger prevention, unplug recovery and close/reopen.
-4. Enable LIVE only intentionally; verify harmless Notepad launch and denial/cancel separately.
-5. Do not use screen monitoring or sensitive browser automation as finished workflows yet.
-6. Install packaging tooling through a reviewed/pinned release setup, build, then launch from a clean Windows account/different cwd.
+References consulted for adapter decisions: [Qt tray](https://doc.qt.io/qtforpython-6/PySide6/QtWidgets/QSystemTrayIcon.html),
+[Qt local server](https://doc.qt.io/qtforpython-6/PySide6/QtNetwork/QLocalServer.html),
+[RegisterHotKey](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerhotkey),
+[ShowWindowAsync](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-showwindowasync).
+These document APIs, not this device's successful effects. Previous reports remain in history/.

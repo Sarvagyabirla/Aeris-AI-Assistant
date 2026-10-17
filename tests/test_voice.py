@@ -3,6 +3,40 @@ from unittest.mock import MagicMock, patch
 from aeris.integrations.voice import VoiceService
 
 
+def test_optional_audio_imports_are_independently_reported(monkeypatch):
+    import builtins
+    from types import SimpleNamespace
+
+    import pytest
+
+    from aeris.integrations.voice import VoiceUnavailableError
+    original = builtins.__import__
+    for missing in ("numpy", "sounddevice"):
+        def importing(name, *args, **kwargs):
+            if name == missing:
+                raise ImportError("fixture optional dependency absent")
+            if name in {"numpy", "sounddevice"}:
+                return SimpleNamespace()
+            return original(name, *args, **kwargs)
+        with monkeypatch.context() as context:
+            context.setattr(builtins, "__import__", importing)
+            with pytest.raises(VoiceUnavailableError, match="packages are missing"):
+                VoiceService().listen_once()
+
+
+def test_unrelated_audio_programming_error_is_not_masked(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    import pytest
+    def broken_stream(**_kwargs):
+        raise ValueError("fixture programming error")
+    monkeypatch.setitem(sys.modules, "numpy", SimpleNamespace())
+    monkeypatch.setitem(sys.modules, "sounddevice", SimpleNamespace(InputStream=broken_stream))
+    with pytest.raises(ValueError, match="programming error"):
+        VoiceService().listen_once()
+
+
 def test_voice_defaults():
     voice = VoiceService()
     assert voice.device == "cpu"
@@ -62,7 +96,8 @@ def test_cuda_generator_failure_retries_once_on_cpu(monkeypatch):
     sd = pytest.importorskip("sounddevice", reason="Audio frame fixture requires sounddevice")
     loads = []
     class Model:
-        def __init__(self, name, device, compute_type):
+        def __init__(self, name, device, compute_type, local_files_only):
+            assert local_files_only is True
             loads.append((device, compute_type))
             self.device = device
         def transcribe(self, *args, **kwargs):
@@ -85,3 +120,20 @@ def test_cuda_generator_failure_retries_once_on_cpu(monkeypatch):
     voice = VoiceService(device="cuda", silence_timeout_ms=100)
     assert voice.listen_once() == "open notepad"
     assert loads == [("cuda", "float16"), ("cpu", "int8")]
+
+
+def test_model_load_is_cache_only_and_missing_assets_are_actionable(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    import pytest
+
+    from aeris.integrations.voice import VoiceUnavailableError
+    calls = []
+    def model(*args, **kwargs):
+        calls.append(kwargs)
+        raise FileNotFoundError("fixture cache missing")
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=model))
+    with pytest.raises(VoiceUnavailableError, match="will not download"):
+        VoiceService()._get_or_load_model()
+    assert calls[0]["local_files_only"] is True

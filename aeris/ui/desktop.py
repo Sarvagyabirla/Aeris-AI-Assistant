@@ -1,22 +1,27 @@
 import queue
+import re as _re
 import sys
 import threading
+import time
 import uuid
 from typing import Any
 
-from PySide6.QtCore import QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QMainWindow,
+    QMenu,
     QProgressBar,
     QPushButton,
+    QSystemTrayIcon,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -24,10 +29,18 @@ from PySide6.QtWidgets import (
 
 from ..activation import extract_addressed_command
 from ..assistant import AerisAssistant
-from ..integrations.voice import VoiceService, VoiceUnavailableError
+from ..integrations.voice import AudioState, VoiceService, VoiceUnavailableError
 from ..models import ActionRequest, PermissionLevel
 from ..state import CancellationToken, CancelledError, app_store
+from .companion import CompanionWindow, ViewPreferences
 from .memory_view import MemoryView
+from .permissions_view import PermissionsView
+from .presence import CharacterWidget, PresenceModel
+from .reminders_view import RemindersView
+from .tasks_view import TasksView
+
+# Phrases that trigger immediate task interrupt even while a task is active.
+_STOP_INTERRUPT = _re.compile(r"^(?:please\s+)?(?:stop|cancel|abort|halt)(?:\s+(?:(?:this|the|current)\s+)?(?:task|command|work))?[.!?]*$", _re.I)
 
 
 class HandsFreeWorker(QThread):
@@ -40,13 +53,31 @@ class HandsFreeWorker(QThread):
         self._stop_event = threading.Event()
         self.voice = None
         self.push_to_talk = threading.Event()
+        self._audio_status = None
+        self.passive_enabled = assistant.config.hands_free
+
+    def audio_state(self, state: AudioState, detail: str = ""):
+        status = f"Audio: {state.value}" + (f" — {detail}" if detail else "")
+        if status != self._audio_status:
+            self._audio_status = status
+            self.readiness.emit(status)
 
     def stop(self):
         self._stop_event.set()
         if self.voice:
             self.voice._cancel_flag = True
+        self.audio_state(AudioState.DISABLED, "Microphone paused")
 
     def run(self):
+        try:
+            self._run_audio()
+        except Exception:
+            self.audio_state(AudioState.UNAVAILABLE, "Audio processing failed; text input remains available")
+        finally:
+            # Cached ASR assets are released on the same owner thread after capture stops.
+            self.voice = None
+
+    def _run_audio(self):
         try:
             self.voice = VoiceService(
                 self.assistant.config.voice_model,
@@ -55,40 +86,86 @@ class HandsFreeWorker(QThread):
                 self.assistant.config.voice_language,
             )
         except VoiceUnavailableError:
+            self.audio_state(AudioState.UNAVAILABLE, "Text input remains available")
             return
 
+        from ..core.tts_worker import global_tts
+        capture_generation = [global_tts.playback_generation]
+        self.voice.state_listener = self.audio_state
+        self.voice.input_allowed = lambda: (
+            not self._stop_event.is_set() and not self.assistant.permissions.stopped
+            and not global_tts.cleanup_pending
+            and not global_tts.speaking.is_set() and time.monotonic() - global_tts.last_output_at >= 0.35
+            and capture_generation[0] == global_tts.playback_generation)
         wake_word = self.assistant.config.wake_word.lower()
-        self.readiness.emit("Speech model not loaded; loaded on first voice use")
+        self.audio_state(AudioState.DISABLED, "Push to talk is available; assets load from cache only")
+        if self.passive_enabled and not self.assistant.permissions.stopped:
+            self.audio_state(AudioState.INITIALIZING, "Cached assets only; text input and Stop remain available")
+            try:
+                self.voice.initialize_cached_model()
+            except (VoiceUnavailableError, RuntimeError):
+                self.audio_state(AudioState.UNAVAILABLE, "Prepare the configured cached model explicitly; text input remains available")
+                return
+            if self._stop_event.is_set():
+                return
         
         while not self._stop_event.is_set():
-            from ..core.tts_worker import global_tts
-            if self.assistant_worker.current_token is not None or global_tts.speaking.is_set():
-                self._stop_event.wait(timeout=0.1)
+            task_active = self.assistant_worker.current_token is not None
+            tts_speaking = global_tts.speaking.is_set()
+            if self.assistant.permissions.stopped:
+                self.push_to_talk.clear()
+                self.audio_state(AudioState.DISABLED, "Global Stop active; explicitly Resume in the app")
+                self._stop_event.wait(0.1)
                 continue
+            if global_tts.cleanup_pending:
+                self.audio_state(AudioState.UNAVAILABLE, "Speech cleanup is pending; microphone paused. Quit and use Retry cleanup")
+                self._stop_event.wait(0.1)
+                continue
+
             addressed = self.push_to_talk.is_set()
-            if not self.assistant.config.hands_free and not addressed:
+            if tts_speaking:
+                if addressed:
+                    global_tts.stop()
+                    self.audio_state(AudioState.INTERRUPTED, "Stopping speech before push to talk")
+                else:
+                    self.audio_state(AudioState.SPEAKING, "Passive capture paused during AERIS speech; use Push to talk or Stop")
+                self._stop_event.wait(0.05)
+                continue
+            if time.monotonic() - global_tts.last_output_at < 0.35:
+                self.audio_state(AudioState.INTERRUPTED, "Waiting for speech playback to settle")
+                self._stop_event.wait(0.05)
+                continue
+            if not self.passive_enabled and not addressed:
+                self.audio_state(AudioState.EXECUTING if task_active else AudioState.DISABLED,
+                                 "Microphone paused; use Push to talk")
                 self._stop_event.wait(0.1)
                 continue
             self.push_to_talk.clear()
-                
+
             try:
+                capture_generation[0] = global_tts.playback_generation
                 self.voice.begin_session()
-                self.readiness.emit("Listening (push-to-talk)" if addressed else "Wake standby — microphone recording")
+                self.audio_state(AudioState.LISTENING if addressed else AudioState.WAKE_STANDBY,
+                                 "Push to talk" if addressed else f"Local transcription for '{wake_word}'; not a trained wake detector")
                 text = self.voice.listen_once()
-                if not text or self._stop_event.is_set():
+                if not text or not self.voice.input_allowed():
                     continue
-                    
-                command = text if addressed else extract_addressed_command(text, (wake_word,))
+
+                addressed_command = extract_addressed_command(text, (wake_word,))
+                command = (text if addressed_command is None else addressed_command) if addressed else addressed_command
                 if command:
                     self.transcript.emit(text)
-                    if not self.assistant_worker.process_command(command):
-                        self.readiness.emit("Busy — voice command not queued. Retry or press Stop.")
-                self.readiness.emit("Speech model: " + self.voice._model_state)
+                    if _STOP_INTERRUPT.fullmatch(command):
+                        self.assistant_worker.cancel_current()
+                        self.audio_state(AudioState.INTERRUPTED, "Task cancellation requested")
+                    elif task_active or not self.assistant_worker.process_command(command):
+                        self.audio_state(AudioState.EXECUTING, "Busy; command not queued. Retry or press Stop")
             except VoiceUnavailableError as exc:
-                self.readiness.emit(str(exc) + " — use text input; toggle listening to retry.")
+                self.audio_state(AudioState.UNAVAILABLE, str(exc) + " Use text input; Push to talk retries.")
                 break
             except Exception:
-                self._stop_event.wait(timeout=2.0)
+                self.audio_state(AudioState.UNAVAILABLE, "Audio processing failed; use text input and retry Push to talk")
+                break
 
 
 class AssistantWorker(QThread):
@@ -96,6 +173,9 @@ class AssistantWorker(QThread):
     response_ready = Signal(str, str)
     permission_requested = Signal(object, object, str)  # request, level, preview
     status_updated = Signal(str)
+    permission_invalidated = Signal()
+    task_updated = Signal(object)
+    turn_completed = Signal(object)
 
     def __init__(self, assistant: AerisAssistant, parent: QWidget | None = None):
         super().__init__(parent)
@@ -114,7 +194,7 @@ class AssistantWorker(QThread):
         command_id = str(uuid.uuid4())
         try:
             with self._lock:
-                if self._stop_event.is_set():
+                if self._stop_event.is_set() or self.current_token is not None:
                     return False
                 self.command_queue.put_nowait((command_id, text, self._generation))
             return True
@@ -129,6 +209,7 @@ class AssistantWorker(QThread):
                 self.current_token.cancel()
         self._permission_result = False
         self._permission_event.set()
+        self.permission_invalidated.emit()
         
         from ..core.tts_worker import global_tts
         global_tts.stop()
@@ -172,6 +253,7 @@ class AssistantWorker(QThread):
 
             token = CancellationToken()
             token.command_id = cmd_id
+            token.progress_callback = self.task_updated.emit
             with self._lock:
                 if generation != self._generation:
                     continue
@@ -192,15 +274,18 @@ class AssistantWorker(QThread):
                 
                 if token.is_cancelled or self._stop_event.is_set():
                     return False
+                self.status_updated.emit('Executing approved task')
                 return bool(self._permission_result)
 
             self.status_updated.emit("Thinking...")
             try:
                 turn = self.assistant.handle(text, approval_closure, token)
-                if token.is_cancelled:
+                self.turn_completed.emit(turn)
+                if token.is_cancelled and not turn.results:
                     self.response_ready.emit(text, "Command cancelled.")
                 else:
                     self.response_ready.emit(text, turn.reply)
+                if not token.is_cancelled and generation == self._generation:
                     from ..core.tts_worker import global_tts
                     global_tts.speak(turn.spoken_summary(), token=token)
             except CancelledError:
@@ -211,13 +296,14 @@ class AssistantWorker(QThread):
                 with self._lock:
                     self.current_token = None
                     self._pending_request_id = None
-                self.status_updated.emit("Ready")
+                self.status_updated.emit("Global Stop active — explicitly resume Aeris" if self.assistant.permissions.stopped else "Ready")
 
 
 class DashboardTab(QWidget):
-    def __init__(self, worker: AssistantWorker, parent: QWidget | None = None):
+    def __init__(self, worker: AssistantWorker, parent: QWidget | None = None, presence=None):
         super().__init__(parent)
         self.worker = worker
+        self.presence = presence or PresenceModel(self)
         self.setup_ui()
 
     def setup_ui(self) -> None:
@@ -240,7 +326,31 @@ class DashboardTab(QWidget):
 
         # Chat history
         self.chat_history = QListWidget()
-        layout.addWidget(self.chat_history)
+        self.chat_history.setWordWrap(True)
+        body = QHBoxLayout()
+        character_panel = QVBoxLayout()
+        self.avatar = CharacterWidget(self.presence)
+        self.avatar.setMaximumWidth(320)
+        character_panel.addWidget(self.avatar, 1)
+        self.presence_label = QLabel('Ready for a task')
+        self.presence_label.setTextFormat(Qt.PlainText)
+        self.presence_label.setWordWrap(True)
+        self.metrics_label = QLabel('')
+        character_panel.addWidget(self.presence_label)
+        character_panel.addWidget(self.metrics_label)
+        body.addLayout(character_panel, 1)
+        conversation = QVBoxLayout()
+        conversation.addWidget(QLabel('Conversation'))
+        conversation.addWidget(self.chat_history, 1)
+        conversation.addWidget(QLabel('Current task · observed results stay visible after Stop'))
+        self.task_steps = QListWidget()
+        self.task_steps.setMaximumHeight(110)
+        self.task_steps.setWordWrap(True)
+        conversation.addWidget(self.task_steps)
+        body.addLayout(conversation, 3)
+        layout.addLayout(body, 1)
+        self.presence.changed.connect(lambda: self.presence_label.setText(self.presence.phase.replace('-', ' ').title() + ' · ' + self.presence.detail))
+        self.worker.task_updated.connect(self.show_task)
 
         # Input area
         input_layout = QHBoxLayout()
@@ -266,6 +376,10 @@ class DashboardTab(QWidget):
             self.update_status("Global Stop active — explicitly resume Aeris")
         emergency.clicked.connect(emergency_stop)
         input_layout.addWidget(emergency)
+        resume = QPushButton("Resume")
+        resume.setToolTip("Explicitly release Emergency Stop")
+        resume.clicked.connect(lambda: self.worker.process_command("resume Aeris"))
+        input_layout.addWidget(resume)
         layout.addLayout(input_layout)
 
         # Connect signals
@@ -297,6 +411,12 @@ class DashboardTab(QWidget):
         self.chat_history.addItem(f"Aeris: {reply}")
         self.chat_history.scrollToBottom()
 
+    def show_task(self, task):
+        self.task_steps.clear()
+        for index, step in enumerate(task['steps'], 1):
+            suffix = ' · effect uncertain' if step.get('uncertain') else ''
+            self.task_steps.addItem(f"{index}. {step['tool'].replace('.', ' / ')} · {step['status']}{suffix}")
+
 
 class SettingsApplyWorker(QThread):
     completed = Signal(bool, str)
@@ -310,7 +430,8 @@ class SettingsApplyWorker(QThread):
         try:
             self.assistant.apply_settings(self.config)
         except Exception:
-            self.completed.emit(False, "Settings were not applied. Check credential storage, settings validity and adapter cleanup.")
+            self.completed.emit(False, self.assistant.config.recovery_message or
+                                "Settings were not applied. Check credential storage, settings validity and adapter cleanup.")
         else:
             self.completed.emit(True, "Executor/provider settings applied.")
 
@@ -324,7 +445,9 @@ class CleanupWorker(QThread):
     def run(self):
         from ..core.tts_worker import global_tts
         try:
-            self.cleaned = global_tts.shutdown() and self.assistant.close()
+            tts_cleaned = global_tts.shutdown()
+            adapters_cleaned = self.assistant.close()
+            self.cleaned = tts_cleaned and adapters_cleaned
         except Exception:
             self.cleaned = False
 
@@ -346,6 +469,11 @@ class SettingsTab(QWidget):
         self.dry_run = QCheckBox()
         self.dry_run.setChecked(self.assistant.config.dry_run)
         layout.addRow("Dry Run (Simulation):", self.dry_run)
+        self.automation_mode = QComboBox()
+        for label, value in [('Assist · preview effects', 'assist'), ('Task Automation · requested goal', 'task'), ('Trusted Routines · reviewed local scope', 'trusted')]:
+            self.automation_mode.addItem(label, value)
+        self.automation_mode.setCurrentIndex(self.automation_mode.findData(self.assistant.config.automation_mode))
+        layout.addRow('Automation mode:', self.automation_mode)
         
         self.hands_free = QCheckBox()
         self.hands_free.setChecked(self.assistant.config.hands_free)
@@ -363,6 +491,8 @@ class SettingsTab(QWidget):
         self.wake_word = QLineEdit()
         self.wake_word.setText(self.assistant.config.wake_word)
         layout.addRow("Wake Word:", self.wake_word)
+        self.timezone_name = QLineEdit(self.assistant.config.timezone_name)
+        layout.addRow("Reminder timezone:", self.timezone_name)
         
         self.save_btn = QPushButton("Save Settings")
         self.save_btn.clicked.connect(self.save_settings)
@@ -378,8 +508,10 @@ class SettingsTab(QWidget):
             return
         config = self.assistant.config.with_overrides(
             ai_enabled=self.ai_enabled.isChecked(), dry_run=self.dry_run.isChecked(),
+            automation_mode=self.automation_mode.currentData(),
             hands_free=self.hands_free.isChecked(), require_signed_installers=self.require_signed.isChecked(),
-            gemini_api_key=self.api_key.text().strip() or None, wake_word=self.wake_word.text().strip() or "aeris")
+            gemini_api_key=self.api_key.text().strip() or None, wake_word=self.wake_word.text().strip() or "aeris",
+            timezone_name=self.timezone_name.text().strip() or "Asia/Kolkata")
         
         self.save_btn.setEnabled(False)
         self.save_status.setText("Applying settings — existing mode remains effective until completed")
@@ -391,8 +523,11 @@ class SettingsTab(QWidget):
     def settings_completed(self, success, message):
         self.save_btn.setEnabled(True)
         self.save_status.setText(message)
+        self.dry_run.setChecked(self.assistant.config.dry_run)
+        self.ai_enabled.setChecked(self.assistant.config.ai_enabled)
+        self.hands_free.setChecked(self.assistant.config.hands_free)
         window = self.window()
-        if success and isinstance(window, AerisMainWindow) and not window._closing:
+        if isinstance(window, AerisMainWindow) and not window._closing:
             window.restart_voice()
             window.mode_label.setText("SIMULATION — no PC changes" if self.assistant.registry.dry_run else "LIVE — real PC actions")
 
@@ -430,6 +565,20 @@ class AppGridTab(QWidget):
             QMessageBox.warning(self, "Busy", "Aeris is currently busy. Please wait.")
 
 
+class TypingTargetsWorker(QThread):
+    completed = Signal(object)
+
+    def __init__(self, desktop, parent=None):
+        super().__init__(parent)
+        self.desktop = desktop
+
+    def run(self):
+        try:
+            self.completed.emit(self.desktop.list_typing_targets())
+        except Exception:
+            self.completed.emit([])
+
+
 class AerisMainWindow(QMainWindow):
     def __init__(self, assistant: AerisAssistant):
         super().__init__()
@@ -437,41 +586,96 @@ class AerisMainWindow(QMainWindow):
         self._closing = False
         self._cleanup_worker = None
         self._voice_generation = 0
+        self._typing_targets_worker = None
+        self._quit_requested = False
+        self._tray = None
+        self._hotkeys = None
+        self._last_worker_status = 'Ready'
+        self._last_turn_failed = False
+        self._interrupted = False
+        self.view_preferences = ViewPreferences(assistant.config.data_dir / 'presentation.json')
+        self.presence = PresenceModel(self)
         self.worker = AssistantWorker(assistant, self)
         self.worker.start()
         self.hands_free = HandsFreeWorker(assistant, self.worker, self)
+        self.hands_free.passive_enabled = assistant.config.hands_free and not self.view_preferences.values['microphone_muted']
         
         self.setWindowTitle("Aeris Assistant")
-        self.resize(800, 600)
+        self.resize(1120, 760)
         self.setup_ui()
         self.setup_styling()
+        self.setup_presence()
         self.hands_free.transcript.connect(lambda text: self.dashboard.chat_history.addItem("Heard: " + text))
-        self.hands_free.readiness.connect(self.voice_label.setText)
+        self.connect_voice_status(self.hands_free)
         self.hands_free.start()
         
     def closeEvent(self, event: Any) -> None:
+        if (not self._quit_requested and not self._closing and self.view_preferences.values['close_to_tray']
+                and self._tray and self._tray.isVisible()):
+            self.hide_to_tray()
+            event.ignore()
+            return
         if not self._closing:
             self._closing = True
             self._voice_generation += 1
             self.assistant.permissions.stop()
             self.hands_free.stop()
             self.worker.stop_worker()
-        if self.hands_free.isRunning() or self.worker.isRunning() or (self.settings.apply_worker and self.settings.apply_worker.isRunning()):
+            self.reminders_view.stop()
+        if (self.hands_free.isRunning() or self.worker.isRunning() or self.reminders_view.reading
+                or (self._typing_targets_worker and self._typing_targets_worker.isRunning())
+                or (self.permissions_view.apply_worker and self.permissions_view.apply_worker.isRunning())
+                or (self.settings.apply_worker and self.settings.apply_worker.isRunning())):
             event.ignore()
             self.dashboard.update_status("Closing — waiting for owned workers to finish")
             QTimer.singleShot(100, self.close)
             return
         if self._cleanup_worker is None:
             self._cleanup_worker = CleanupWorker(self.assistant, self)
+            self._cleanup_worker.finished.connect(self.close)
             self._cleanup_worker.start()
-        if self._cleanup_worker.isRunning() or not self._cleanup_worker.cleaned:
+        if self._cleanup_worker.isRunning():
             event.ignore()
             self.dashboard.update_status("Closing — adapter cleanup pending; window retained safely")
-            QTimer.singleShot(100, self.close)
             return
+        if not self._cleanup_worker.cleaned:
+            event.ignore()
+            self.dashboard.update_status("Cleanup failed — window retained. Retry cleanup after checking diagnostics.")
+            self.cleanup_retry_btn.show()
+            self.show()  # Cleanup failures must remain recoverable even from tray.
+            return
+        self.presence_timer.stop()
+        self.companion.hide()
+        if self._tray:
+            self._tray.hide()
+        if self._hotkeys:
+            self._hotkeys.close()
         super().closeEvent(event)
 
-    def restart_voice(self):
+    @Slot()
+    def retry_cleanup(self):
+        if self._cleanup_worker is not None and self._cleanup_worker.isRunning():
+            return
+        if self._cleanup_worker is not None:
+            self._cleanup_worker.deleteLater()
+        self._cleanup_worker = None
+        self.cleanup_retry_btn.hide()
+        self.close()
+
+    def connect_voice_status(self, voice_worker):
+        voice_worker.readiness.connect(lambda text: self.voice_label.setText(text)
+                                      if self.hands_free is voice_worker and not self._closing else None)
+
+    def request_push_to_talk(self):
+        if self.assistant.permissions.stopped:
+            self.voice_label.setText("Audio: disabled — explicitly Resume after Global Stop")
+            return
+        if not self.hands_free.isRunning() or self.hands_free._stop_event.is_set():
+            self.restart_voice(push_to_talk=True)
+        else:
+            self.hands_free.push_to_talk.set()
+
+    def restart_voice(self, push_to_talk=False):
         if self._closing:
             return
         self._voice_generation += 1
@@ -483,9 +687,14 @@ class AerisMainWindow(QMainWindow):
             if self.hands_free.isRunning():
                 QTimer.singleShot(100, restart)
                 return
+            self.hands_free.voice = None
+            self.hands_free.deleteLater()
             self.hands_free = HandsFreeWorker(self.assistant, self.worker, self)
+            self.hands_free.passive_enabled = self.assistant.config.hands_free and not self.view_preferences.values['microphone_muted']
             self.hands_free.transcript.connect(lambda text: self.dashboard.chat_history.addItem("Heard: " + text))
-            self.hands_free.readiness.connect(self.voice_label.setText)
+            self.connect_voice_status(self.hands_free)
+            if push_to_talk:
+                self.hands_free.push_to_talk.set()
             self.hands_free.start()
         restart()
         
@@ -493,7 +702,7 @@ class AerisMainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
         
-        self.dashboard = DashboardTab(self.worker)
+        self.dashboard = DashboardTab(self.worker, presence=self.presence)
         self.apps = AppGridTab(self.worker)
         self.settings = SettingsTab(self.assistant)
         
@@ -502,30 +711,294 @@ class AerisMainWindow(QMainWindow):
         self.tabs.addTab(self.settings, "Settings")
         self.memory_view = MemoryView(self.assistant.memory)
         self.tabs.addTab(self.memory_view, "Local memory")
+        self.reminders_view = RemindersView(self.assistant, self.worker, self)
+        self.tabs.addTab(self.reminders_view, "Reminders")
+        self.tasks_view = TasksView(self.assistant, self.worker, self)
+        self.tabs.addTab(self.tasks_view, 'Tasks & routines')
+        self.permissions_view = PermissionsView(self.assistant, self.worker, self)
+        self.tabs.addTab(self.permissions_view, 'Permissions')
+        self.reminders_view.notification.connect(lambda: self.dashboard.chat_history.addItem("Aeris: A reminder is due. Open the Reminders tab to review it."))
         self.mode_label = QLabel("SIMULATION — no PC changes" if self.assistant.registry.dry_run else "LIVE — real PC actions")
         self.voice_label = QLabel("Microphone muted until listening is enabled or push-to-talk is pressed")
+        self.voice_label.setWordWrap(True)
         self.dashboard.layout().insertWidget(0, self.mode_label)
         self.dashboard.layout().insertWidget(1, self.voice_label)
+        self.cleanup_retry_btn = QPushButton("Retry cleanup and quit")
+        self.cleanup_retry_btn.setToolTip("Retry owned adapter cleanup; tasks remain stopped until Aeris closes")
+        self.cleanup_retry_btn.clicked.connect(self.retry_cleanup)
+        self.cleanup_retry_btn.hide()
+        self.dashboard.layout().addWidget(self.cleanup_retry_btn)
         voice_controls = QHBoxLayout()
         ptt = QPushButton("Push to talk")
-        def push_to_talk():
-            if not self.hands_free.isRunning():
-                self.restart_voice()
-            self.hands_free.push_to_talk.set()
-        ptt.clicked.connect(push_to_talk)
+        ptt.clicked.connect(self.request_push_to_talk)
         speech_mute = QCheckBox("Mute speech")
         from ..core.tts_worker import global_tts
         speech_mute.toggled.connect(lambda muted: setattr(global_tts, "muted", muted))
         mic_mute = QPushButton("Mute microphone")
-        mic_mute.clicked.connect(lambda: self.hands_free.stop())
+        mic_mute.clicked.connect(self.mute_microphone)
+        mic_enable = QPushButton('Enable saved listening')
+        mic_enable.clicked.connect(self.enable_saved_listening)
         voice_controls.addWidget(ptt)
         voice_controls.addWidget(mic_mute)
+        voice_controls.addWidget(mic_enable)
         voice_controls.addWidget(speech_mute)
         self.dashboard.layout().addLayout(voice_controls)
+        typing_controls = QHBoxLayout()
+        self.typing_target_btn = QPushButton("Select task / typing window")
+        self.typing_target_btn.setToolTip("Choose one external window before asking Aeris to type; each action still needs confirmation")
+        self.typing_target_btn.clicked.connect(self.choose_typing_window)
+        self.typing_target_label = QLabel("Typing window: not selected")
+        self.typing_target_label.setTextFormat(Qt.PlainText)
+        self.typing_target_label.setWordWrap(True)
+        typing_controls.addWidget(self.typing_target_btn)
+        typing_controls.addWidget(self.typing_target_label, 1)
+        self.dashboard.layout().addLayout(typing_controls)
         self.dashboard.stop_btn.clicked.connect(lambda: self.hands_free.voice.cancel_recording() if self.hands_free.voice else None)
         
         # Connect permission request
         self.worker.permission_requested.connect(self.handle_permission)
+
+    def setup_presence(self):
+        self.dashboard.avatar.set_reduced_motion(self.view_preferences.values['reduced_motion'])
+        self.companion = CompanionWindow(self.presence, self.worker, self.view_preferences)
+        self.companion.setStyleSheet(self.styleSheet())
+        self.companion.dashboard_requested.connect(self.show_dashboard)
+        self.companion.hide_requested.connect(self.hide_to_tray)
+        self.companion.mic_btn.clicked.connect(self.request_push_to_talk)
+        self.companion.mute_mic_btn.clicked.connect(self.mute_microphone)
+        self.companion.stop_btn.clicked.connect(self.cancel_audio_capture)
+        self.companion.recovery_available = lambda: bool((self._tray and self._tray.isVisible()) or (self._hotkeys and self._hotkeys.can_restore))
+        self.tabs.currentChanged.connect(lambda _: self.dashboard.avatar.sync_animation())
+        controls = QHBoxLayout()
+        companion_button = QPushButton('Floating companion')
+        companion_button.clicked.connect(self.show_companion)
+        tray_button = QPushButton('Hide to tray')
+        tray_button.clicked.connect(self.hide_to_tray)
+        self.reduced_motion = QCheckBox('Reduced motion')
+        self.reduced_motion.setChecked(self.view_preferences.values['reduced_motion'])
+        self.reduced_motion.toggled.connect(self.set_reduced_motion)
+        self.close_to_tray = QCheckBox('Close to tray')
+        self.close_to_tray.setChecked(self.view_preferences.values['close_to_tray'])
+        self.close_to_tray.toggled.connect(lambda value: self.save_view(close_to_tray=value))
+        for widget in (companion_button, tray_button, self.reduced_motion, self.close_to_tray):
+            controls.addWidget(widget)
+        self.dashboard.layout().addLayout(controls)
+        self.worker.status_updated.connect(self.worker_state)
+        self.worker.turn_completed.connect(self.turn_finished)
+        self.worker.task_updated.connect(self.task_state)
+        self.worker.permission_invalidated.connect(lambda: setattr(self, '_interrupted', True))
+        # Application shortcuts remain useful when native registration is unavailable.
+        self.shortcuts = []
+        for sequence, callback in [('Ctrl+Alt+A', self.recover_views), ('Ctrl+Alt+S', self.worker.cancel_current), ('Ctrl+Alt+Space', self.request_push_to_talk)]:
+            shortcut = QShortcut(sequence, self)
+            shortcut.setContext(Qt.ApplicationShortcut)
+            shortcut.activated.connect(callback)
+            self.shortcuts.append(shortcut)
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            pixmap = QPixmap(32, 32)
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            painter.setPen(QColor('#56d9ed'))
+            painter.setFont(QFont('Segoe UI', 21, QFont.Bold))
+            painter.drawText(pixmap.rect(), Qt.AlignCenter, 'A')
+            painter.end()
+            self._tray = QSystemTrayIcon(QIcon(pixmap), self)
+            menu = QMenu(self)
+            for label, callback in [('Open dashboard / recover clicks', self.recover_views), ('Show companion', self.show_companion),
+                                    ('Stop task and speech', self.worker.cancel_current), ('Emergency Stop', self.emergency_stop),
+                                    ('Mute microphone', self.mute_microphone), ('Enable saved listening', self.enable_saved_listening), ('Quit Aeris', self.quit_application)]:
+                action = QAction(label, menu)
+                action.triggered.connect(callback)
+                menu.addAction(action)
+            self._tray.setContextMenu(menu)
+            self._tray.setToolTip('Aeris · Ctrl+Alt+A restore · Ctrl+Alt+S Stop · Ctrl+Alt+Space talk')
+            self._tray.activated.connect(lambda reason: self.recover_views() if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick) else None)
+            self._tray.show()
+        self.presence_timer = QTimer(self)
+        self.presence_timer.setInterval(100)
+        self.presence_timer.timeout.connect(self.refresh_presence)
+        self.presence_timer.start()
+        app = QApplication.instance()
+        app.screenAdded.connect(self.screen_changed)
+        app.screenRemoved.connect(self.screen_changed)
+        for screen in app.screens():
+            self.observe_screen(screen)
+        self.screen_changed()
+
+    def observe_screen(self, screen):
+        screen.availableGeometryChanged.connect(self.screen_changed)
+
+    def screen_changed(self, *args):
+        if args and hasattr(args[0], 'availableGeometry') and args[0] in QApplication.screens():
+            self.observe_screen(args[0])
+        self.companion.fit_to_screens([screen.availableGeometry() for screen in QApplication.screens()])
+
+    def save_view(self, **changes):
+        try:
+            self.view_preferences.save(**changes)
+        except OSError:
+            self.dashboard.update_status('View preference could not be saved; current view remains usable')
+
+    def set_reduced_motion(self, value):
+        self.dashboard.avatar.set_reduced_motion(value)
+        self.companion.avatar.set_reduced_motion(value)
+        self.save_view(reduced_motion=value)
+
+    def show_companion(self):
+        if self._closing:
+            return
+        self.screen_changed()
+        self.companion.show()
+        self.hide()
+        self.save_view(view='companion')
+
+    def show_dashboard(self):
+        if self._closing:
+            self.show()
+            return
+        self.companion.set_click_through(False)
+        self.companion.hide()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()  # Only explicit user restore requests activate.
+        geometry = self.companion.geometry()
+        self.save_view(view='dashboard', geometry=[geometry.x(), geometry.y(), geometry.width(), geometry.height()])
+
+    def recover_views(self):
+        self.show_dashboard()
+
+    def hide_to_tray(self):
+        if self._tray and self._tray.isVisible():
+            self.companion.set_click_through(False)
+            self.companion.hide()
+            self.hide()
+        else:
+            self.showMinimized()  # Always preserve a taskbar recovery path.
+            self.companion.hide()
+
+    def quit_application(self):
+        geometry = self.companion.geometry()
+        self.save_view(geometry=[geometry.x(), geometry.y(), geometry.width(), geometry.height()])
+        self._quit_requested = True
+        self.companion.hide()
+        self.show()
+        self.close()
+
+    def emergency_stop(self):
+        self.assistant.permissions.stop()
+        self.stop_current_task()
+
+    def cancel_audio_capture(self):
+        if self.hands_free.voice:
+            self.hands_free.voice.cancel_recording()
+
+    def mute_microphone(self):
+        self.hands_free.stop()
+        self.save_view(microphone_muted=True)
+
+    def enable_saved_listening(self):
+        if not self.assistant.config.hands_free:
+            self.voice_label.setText('Audio: disabled - opt into Hands-Free in Settings first. Push to talk remains available.')
+            return
+        self.save_view(microphone_muted=False)
+        self.restart_voice()
+
+    def stop_current_task(self):
+        self.worker.cancel_current()
+        self.cancel_audio_capture()
+
+    def worker_state(self, text):
+        self._last_worker_status = text
+        if text.startswith('Thinking'):
+            self._last_turn_failed = False
+            self._interrupted = False
+        self.refresh_presence()
+
+    def task_state(self, task):
+        self.presence.task = task
+        self.refresh_presence()
+
+    def turn_finished(self, turn):
+        self._last_turn_failed = turn.status == 'failed'
+        self._interrupted = turn.status == 'cancelled'
+        self.refresh_presence()
+        if self._last_turn_failed and not self.isVisible() and not self.companion.isVisible():
+            self.show_dashboard()
+
+    def refresh_presence(self):
+        from ..core.tts_worker import global_tts
+        audio = self.voice_label.text().split('Audio: ', 1)[-1].split(' ')[0].strip()
+        audio_changed = self.presence.audio != audio
+        self.presence.audio = audio
+        phase, detail = 'idle', 'Ready for a task'
+        if self.assistant.permissions.stopped:
+            phase, detail = 'interrupted', 'Emergency Stop latched · explicitly Resume'
+        elif self._closing:
+            phase, detail = 'interrupted', 'Closing · waiting for owned cleanup'
+        elif 'Awaiting permission' in self._last_worker_status and self.worker.current_token:
+            phase, detail = 'awaiting-permission', 'Review the exact action in the dashboard'
+        elif self._interrupted:
+            phase, detail = 'interrupted', 'Stop requested · completed effects stay in the transcript'
+        elif global_tts.speaking.is_set():
+            phase, detail = 'speaking', 'Speaking the observed task result'
+        elif self.worker.current_token:
+            executing = self.presence.task and any(step['status'] == 'executing' for step in self.presence.task['steps'])
+            phase, detail = ('executing', 'Running the current step') if executing else ('thinking', 'Resolving the requested task')
+        elif self._last_turn_failed:
+            phase, detail = 'error', 'Task failed · review the result before retrying'
+        elif audio in {'listening', 'wake_standby', 'wake'}:
+            phase, detail = 'listening', 'Microphone active · local transcription'
+        elif audio in {'initializing', 'transcribing'}:
+            phase, detail = 'thinking', 'Preparing or transcribing local audio'
+        elif not self.assistant.config.ai_enabled:
+            phase, detail = 'offline', 'Local controls ready · AI disabled'
+        self.presence.update_state(phase, detail)
+        if audio_changed:
+            self.presence.changed.emit()
+        # Measured process memory only. No decorative CPU/network/model claims.
+        if self.isVisible() and int(time.monotonic()) != getattr(self, '_metrics_second', None):
+            self._metrics_second = int(time.monotonic())
+            try:
+                import psutil
+                self.dashboard.metrics_label.setText(f'Aeris process · {psutil.Process().memory_info().rss / 1024**2:.0f} MiB RAM')
+            except (ImportError, OSError):
+                self.dashboard.metrics_label.setText('Process memory unavailable')
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if hasattr(self, 'dashboard'):
+            self.dashboard.avatar.sync_animation()
+
+    @Slot()
+    def choose_typing_window(self):
+        if self._closing or (self._typing_targets_worker and self._typing_targets_worker.isRunning()):
+            return
+        self.typing_target_btn.setEnabled(False)
+        self.typing_target_label.setText("Looking for supported visible windows…")
+        if self._typing_targets_worker:
+            self._typing_targets_worker.deleteLater()
+        self._typing_targets_worker = TypingTargetsWorker(self.assistant._desktop, self)
+        self._typing_targets_worker.completed.connect(self.typing_targets_ready)
+        self._typing_targets_worker.start()
+
+    @Slot(object)
+    def typing_targets_ready(self, candidates):
+        from PySide6.QtWidgets import QInputDialog
+        if self._closing:
+            return
+        self.typing_target_btn.setEnabled(True)
+        if not candidates:
+            self.typing_target_label.setText("No supported window found. Open an editor and try again; Windows input support is required.")
+            return
+        labels = [f"{item['expected_title']} — {item['process_name']} (window {item['window_id']})" for item in candidates]
+        choice, accepted = QInputDialog.getItem(self, "Choose typing window",
+            "Choose the window and keep its intended text control focused. Every typing request has a separate preview.", labels, 0, False)
+        if not accepted:
+            self.typing_target_label.setText("Selection cancelled; no new typing target selected")
+            return
+        candidate = candidates[labels.index(choice)]
+        result = self.assistant._desktop.select_typing_target(candidate["window_id"])
+        self.typing_target_label.setText(f"Typing window: {candidate['expected_title']}" if result.success else result.message)
         
     def setup_styling(self) -> None:
         # Dark cyan theme
@@ -586,20 +1059,68 @@ class AerisMainWindow(QMainWindow):
     @Slot(object, object, str)
     def handle_permission(self, request: ActionRequest, level: PermissionLevel, preview: str) -> None:
         from PySide6.QtWidgets import QMessageBox
+        if (request.request_id != self.worker._pending_request_id or not self.worker.current_token
+                or self.worker.current_token.is_cancelled or self._closing):
+            return
+        self.show_dashboard()
         msg = QMessageBox(self)
         msg.setWindowTitle("Permission Required")
+        msg.setTextFormat(Qt.PlainText)
         msg.setText(f"Aeris wants to perform an action:\n\n{preview}")
+        if request.tool in {'files.organize', 'files.undo_organization'}:
+            args = request.arguments
+            manifest = args.get('manifest', [])
+            verb = 'Organize' if request.tool == 'files.organize' else 'Restore'
+            msg.setText(f'{verb} {len(manifest)} documents?\n\n'
+                        f'Folder: {args.get("path", "the selected batch")}\n'
+                        'Open Details to review every source and destination. File identities and bytes are bound to this review. '
+                        'No existing destination is overwritten. Stop retains completed changes for review; Undo refuses newer edits.')
+            msg.setDetailedText('\n'.join(f'{item["source"]}\n  -> {item["destination"]}' for item in manifest))
+        if request.tool in {'desktop.close_app', 'desktop.close_current_window'}:
+            args = request.arguments
+            msg.setText(f"Close {args.get('name')} normally?\n\nWindow: {args.get('expected_title', '')}\n"
+                        f"Process: {args.get('process_id')} / window: {args.get('window_id')}\n\n"
+                        "The app can show its unsaved-work prompt. Aeris will not force-terminate it.")
+        elif request.tool == "desktop.type_text":
+            args = request.arguments
+            msg.setText(f"Type into {args.get('expected_title', '')}?\n\n"
+                        f"Application: {args.get('process_name', '')}\n"
+                        f"Window: {args.get('window_id')} / focused control: {args.get('focus_window_id')}\n\n"
+                        "Approval restores focus to this selected window. Aeris stops if the window or focused control changes. "
+                        "Open Details to review the exact text. Input delivery cannot prove the app accepted the text.")
+            msg.setDetailedText(args.get("text", ""))
         msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
         msg.setDefaultButton(QMessageBox.No)
+        if request.tool == "desktop.type_text":
+            msg.button(QMessageBox.Yes).setText("Type into this window")
         
         # In a real app, you might want custom dialogs for emails vs downloads.
         # This uses a simple Yes/No.
-        ret = msg.exec()
-        self.worker.provide_permission(ret == QMessageBox.Yes, request.request_id)
+        self.worker.permission_invalidated.connect(msg.reject)
+        try:
+            ret = msg.exec()
+        finally:
+            self.worker.permission_invalidated.disconnect(msg.reject)
+        allowed = ret == QMessageBox.Yes
+        if allowed and request.tool == "desktop.type_text":
+            token = self.worker.current_token
+            allowed = bool(token and not token.is_cancelled and not self._closing
+                           and request.request_id == self.worker._pending_request_id
+                           and self.assistant._desktop.restore_typing_target(request.arguments, token=token))
+            if not allowed:
+                self.dashboard.chat_history.addItem("Aeris: Typing target could not be restored safely. Select the window/control again; no text was sent.")
+        self.worker.provide_permission(allowed, request.request_id)
 
 
 def launch_desktop(assistant: AerisAssistant) -> int:
+    from .hotkeys import GlobalHotkeys
+    from .single_instance import InstanceServer
     app = QApplication(sys.argv)
     window = AerisMainWindow(assistant)
-    window.show()
+    window._hotkeys = GlobalHotkeys(app, window.recover_views, window.stop_current_task, window.request_push_to_talk)
+    window.instance_server = InstanceServer(window.recover_views, window)
+    if window.view_preferences.values['view'] == 'companion':
+        window.show_companion()
+    else:
+        window.show()
     return app.exec()

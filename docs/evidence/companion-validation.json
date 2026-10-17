@@ -1,0 +1,41 @@
+{
+  "baseline": {
+    "passed": 356,
+    "skipped": 1
+  },
+  "final": {
+    "passed": 395,
+    "skipped": 1,
+    "failures": 0,
+    "junit_seconds": "12.018"
+  },
+  "python": "3.11.9",
+  "windows_build": "26200",
+  "secret_pattern_scan": {
+    "changed_text_files": 131,
+    "candidate_files": [],
+    "limits": "Known key/private-key patterns only, not proof of absence of every secret. Ignored personal runtime files were not inspected."
+  },
+  "images": {
+    "companion-dashboard-1280.png": "cd63137d8ed25b468522e6b2f723602e349994a43ce49b00a7216cd7d63aadc9",
+    "companion-dashboard-1920.png": "a5177fd76bc68c5fe5405e38b74758e7b5ec87382c0b45a1587b0b95c6b560c2",
+    "companion-floating.png": "879f95230b7f8fee66ba97fd2716d95e13a3757f239260f9310978ec08867837",
+    "companion-permissions.png": "dfec77674572937801a192e1cb878f5604ae4fc23506d5cfa18eb1bbe6a38eb8",
+    "companion-scale-1.25.png": "882de06c03d45ab79babdad12d8920b13cab1d067b05af12bf7e6137e13ef854",
+    "companion-scale-1.5.png": "0ca44300c4b1a188726ba6e45661f705c6aacc457627ac75b9ba2c9b757c4d28",
+    "companion-scale-2.png": "2e17299b20d7892b0ee2654defcf0e91fd9115fbb688e467024114840e64a587",
+    "companion-tasks.png": "e7c3f914888ca40f781d6b28ee39b5b7b5e769577a084617c2f63170239f9721"
+  },
+  "wheel": {
+    "build": "offline --no-index --no-deps --no-build-isolation",
+    "catalogs_present": true,
+    "excluded_artifacts": 0,
+    "sha256": "422eec158b22390cfc456e1a500de5e9c59a3d7aa63f05e5d1620c6822ac8218",
+    "imports": "core and optional UI",
+    "frozen": false
+  },
+  "real_device": "NOT RUN",
+  "remote_ci": "NOT RUN",
+  "frozen_executable": "NOT IMPLEMENTED",
+  "commits_pushes": false
+}

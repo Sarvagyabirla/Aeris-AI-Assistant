@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from . import schemas
+from .access import AccessProfile, ScopePolicy
 from .audit import AuditLogger
-from .config import AerisConfig
+from .config import AerisConfig, SettingsRecoveryError
 from .followup import FollowUpContext
 from .integrations.gemini import GeminiPlanner
 from .integrations.gmail import GmailClient
@@ -20,7 +23,11 @@ from .memory import MemoryStore
 from .models import ActionRequest, ActionResult, AssistantTurn, PermissionLevel, PlannedResponse
 from .permissions import ApprovalCallback, PermissionEngine
 from .registry import ToolRegistry, ToolSpec
+from .reminders import ReminderStore
 from .router import LocalRouter
+from .routines import RoutineStore, scope_fingerprint
+from .state import CancelledError
+from .tasks import TaskJournal, TaskPlan
 from .timing import StageTimer
 from .tools import (
     BrowserAdvancedTools,
@@ -32,32 +39,49 @@ from .tools import (
     PackageTools,
     SystemTools,
 )
+from .tools.organization import OrganizationTools
+from .tools.reminders import ReminderTools
 
 
 class AerisAssistant:
     def __init__(self, config: AerisConfig | None = None):
         self.config = config or AerisConfig.load()
         self._task_lock = threading.RLock()
+        self._task_depth = 0
+        # A failed close never releases ownership. Retired adapters remain here
+        # until an explicit settings/cleanup retry confirms their release.
+        self._retired_providers: list[Any] = []
         self.audit = AuditLogger(self.config.audit_log)
         self.memory = MemoryStore(self.config.memory_db)
         self.permissions = PermissionEngine()
+        self.permissions.profile = AccessProfile(self.config.data_dir / 'access-profile.json')
+        self.permissions.mode = self.config.automation_mode
+        self.scope_policy = ScopePolicy(self.config.allowed_paths, self.config.data_dir / 'access-revocations.json')
         self.registry = ToolRegistry(self.permissions, self.audit, dry_run=self.config.dry_run)
-        self.router = LocalRouter()
+        self.router = LocalRouter(self.config.wake_word)
         self.followup = FollowUpContext()
+        self.task_journal = TaskJournal(self.config.data_dir / 'tasks.db')
+        self.routine_store = RoutineStore(self.config.data_dir / 'routines.db')
         self._gemini = (
             GeminiPlanner(self.config.gemini_api_key, self.config.gemini_model)
             if self.config.ai_enabled and self.config.gemini_api_key
             else None
         )
         self._ollama = OllamaPlanner() if self.config.ai_enabled else None
+        self.reminder_store = ReminderStore(self.config.data_dir / "reminders.db", self.config.timezone_name,
+            enabled=lambda: not self.permissions.stopped and not self.registry.dry_run)
         self._register_tools()
 
     def _register_tools(self) -> None:
         desktop = DesktopTools(self.config.app_catalog_file, self.config.data_dir / "screenshots")
+        self._desktop = desktop
         browser = BrowserTools(self.config.allowed_domains)
         browser_adv = BrowserAdvancedTools(self.config.allowed_domains)
         self._browser = browser_adv
         files = FilesystemTools(self.config.allowed_paths)
+        self._files = files
+        files.guard.policy = self.scope_policy
+        self._organization = OrganizationTools(files, self.config.data_dir / 'file-batches.db')
         downloads = DownloadTools(
             self.config.download_dir,
             self.config.allowed_domains,
@@ -68,6 +92,7 @@ class AerisAssistant:
             self.config.package_catalog_file,
             self.config.require_signed_installers,
         )
+        packages.guard.policy = self.scope_policy
         system = SystemTools()
         ai_key = self.config.gemini_api_key if self.config.ai_enabled else None
         vision = ScreenVision(ai_key, self.config.gemini_model)
@@ -77,14 +102,19 @@ class AerisAssistant:
             ai_key,
             self.config.gemini_model,
         )
+        coding.guard.policy = self.scope_policy
         gmail = GmailClient(self.config.gmail_credentials_file)
         calendar = GoogleCalendarClient(self.config.gmail_credentials_file)
+        reminder_tools = ReminderTools(self.reminder_store)
 
         def status(_: dict[str, Any]) -> ActionResult:
-            data = self.config.public_summary() | {
-                "dry_run": self.registry.dry_run,
-                "stopped": self.permissions.stopped,
-                "registered_tools": len(self.registry.names()),
+            runtime = getattr(self, "_runtime_owner", self)
+            data = runtime.config.public_summary() | {
+                "dry_run": runtime.registry.dry_run,
+                "stopped": runtime.permissions.stopped,
+                "registered_tools": len(runtime.registry.names()),
+                "provider_cleanup_pending": len(runtime._retired_providers),
+                "settings_recovery_required": bool(runtime.config.recovery_message),
             }
             return ActionResult(True, "Aeris status loaded.", data=data)
 
@@ -97,6 +127,10 @@ class AerisAssistant:
             return ActionResult(True, "Aeris resumed.")
 
         specs = [
+            ToolSpec('files.organize', 'Review and organize at most 100 local documents with hash-checked Undo.',
+                     PermissionLevel.CONFIRM, self._organization.organize, model=schemas.OrganizeFiles, prepare=self._organization.prepare),
+            ToolSpec('files.undo_organization', 'Restore a reviewed organization batch without overwriting newer files.',
+                     PermissionLevel.CONFIRM, self._organization.undo, model=schemas.UndoOrganization, prepare=self._organization.prepare_undo),
             ToolSpec(
                 "system.status", "Show safe configuration and runtime status.", PermissionLevel.AUTO, status
             ),
@@ -109,6 +143,8 @@ class AerisAssistant:
                 system.health,
             ),
             ToolSpec("system.battery", "Show battery and charging status.", PermissionLevel.AUTO, system.battery),
+            ToolSpec("system.network_test", "One approved ICMP probe to Microsoft; not a general internet-health guarantee.",
+                     PermissionLevel.CONFIRM, system.network_test, model=schemas.NetworkTest),
             ToolSpec("system.lock", "Lock the Windows session.", PermissionLevel.CONFIRM, system.lock),
             ToolSpec("system.sleep", "Put the computer to sleep.", PermissionLevel.CONFIRM, system.sleep),
             ToolSpec(
@@ -146,10 +182,11 @@ class AerisAssistant:
             ),
             ToolSpec(
                 "desktop.close_app",
-                "Close a configured application; unsaved work may be lost.",
+                "Preview and request one selected app window to close normally, preserving its own unsaved-work prompts.",
                 PermissionLevel.CONFIRM,
                 desktop.close_app,
                 model=schemas.CloseApp,
+                prepare=desktop.prepare_close_app,
             ),
             ToolSpec(
                 "desktop.set_volume",
@@ -188,10 +225,11 @@ class AerisAssistant:
             ),
             ToolSpec(
                 "desktop.type_text",
-                "Type text into the currently active application.",
+                "Preview an exact application window and dispatch Unicode text; insertion is not read back.",
                 PermissionLevel.CONFIRM,
                 desktop.type_text,
                 model=schemas.TypeText,
+                prepare=desktop.prepare_type_text,
             ),
             ToolSpec(
                 "desktop.screenshot",
@@ -218,12 +256,15 @@ class AerisAssistant:
                 PermissionLevel.AUTO,
                 desktop.window_action,
                 model=schemas.WindowAction,
+                prepare=desktop.prepare_window_action,
             ),
             ToolSpec(
                 "desktop.close_current_window",
                 "Close the active window; unsaved work may be lost.",
                 PermissionLevel.CONFIRM,
                 desktop.close_current_window,
+                model=schemas.CloseCurrentWindow,
+                prepare=desktop.prepare_close_current_window,
             ),
             ToolSpec(
                 "vision.inspect_screen",
@@ -456,6 +497,33 @@ class AerisAssistant:
                 gmail.send_email,
                 model=schemas.SendEmail,
             ),
+            ToolSpec(
+                "reminder.set",
+                "Set a durable reminder with timezone-aware schedule.",
+                PermissionLevel.AUTO,
+                reminder_tools.set_reminder,
+                model=schemas.SetReminder,
+            ),
+            ToolSpec(
+                "reminder.list",
+                "List pending reminders.",
+                PermissionLevel.SESSION,
+                reminder_tools.list_reminders,
+            ),
+            ToolSpec(
+                "reminder.snooze",
+                "Snooze a pending reminder by ID for a specified number of minutes.",
+                PermissionLevel.AUTO,
+                reminder_tools.snooze_reminder,
+                model=schemas.SnoozeReminder,
+            ),
+            ToolSpec(
+                "reminder.cancel",
+                "Cancel a reminder by ID.",
+                PermissionLevel.AUTO,
+                reminder_tools.cancel_reminder,
+                model=schemas.CancelReminder,
+            ),
         ]
         for spec in specs:
             self.registry.register(spec)
@@ -465,39 +533,147 @@ class AerisAssistant:
         config.validate()
         if not self._task_lock.acquire(blocking=False):
             raise RuntimeError("Aeris is busy. Stop or finish the task before applying settings.")
+        staged = None
+        published = False
         try:
+            if self._task_depth:
+                raise RuntimeError("Aeris is busy. Stop or finish the task before applying settings.")
+            if not self._retry_retired_providers():
+                raise RuntimeError("Provider cleanup is pending; retry cleanup before applying more settings.")
             staged = object.__new__(AerisAssistant)
             staged.config = config
+            staged._runtime_owner = self
             staged.permissions = self.permissions
+            staged.scope_policy = self.scope_policy
             staged.audit = self.audit
+            staged._retired_providers = self._retired_providers
             staged.registry = ToolRegistry(self.permissions, self.audit, dry_run=config.dry_run)
             staged._gemini = GeminiPlanner(config.gemini_api_key, config.gemini_model) if config.ai_enabled and config.gemini_api_key else None
             staged._ollama = OllamaPlanner() if config.ai_enabled else None
+            if config.data_dir != self.config.data_dir:
+                staged.reminder_store = ReminderStore(config.data_dir / "reminders.db", config.timezone_name)
+            else:
+                staged.reminder_store = self.reminder_store
             staged._register_tools()
             if not self._browser.close():
                 raise RuntimeError("Browser cleanup is pending; settings were not applied.")
-            config.save()
+            try:
+                config.save()
+            except SettingsRecoveryError as exc:
+                self._enter_settings_recovery(str(exc))
+                raise
+            # A successful explicit save resolves an earlier recovery warning.
+            config = config.with_overrides(recovery_message="")
+            staged.config = config
+            previous_providers = (self._gemini, self._ollama)
+            previous_reminders = self.reminder_store
             self.config = config
+            self.permissions.mode = config.automation_mode
+            self.scope_policy.replace(config.allowed_paths)
+            self.router = LocalRouter(config.wake_word)
             self.permissions.clear_session()
             self.followup.clear()
             self.registry = staged.registry
             self._browser = staged._browser
+            self._desktop = staged._desktop
+            self._files = staged._files
+            self._organization = staged._organization
             self._gemini = staged._gemini
             self._ollama = staged._ollama
+            self.reminder_store = staged.reminder_store
+            self.reminder_store.timezone_name = config.timezone_name
+            from .reminders import reminder_timezone
+            self.reminder_store.timezone = reminder_timezone(config.timezone_name)
+            self.reminder_store.enabled = lambda: not self.permissions.stopped and not self.registry.dry_run
+            published = True
+            if previous_reminders is not self.reminder_store:
+                previous_reminders.stop()
+            for provider in previous_providers:
+                self._retire_provider(provider)
+        finally:
+            try:
+                if staged is not None and not published:
+                    for name in ("_gemini", "_ollama"):
+                        self._retire_provider(getattr(staged, name, None))
+                    if hasattr(staged, "_browser"):
+                        staged._browser.close()
+                    if getattr(staged, "reminder_store", self.reminder_store) is not self.reminder_store:
+                        staged.reminder_store.stop()
+            finally:
+                self._task_lock.release()
+
+    def _enter_settings_recovery(self, message: str) -> None:
+        self.config = self.config.with_overrides(
+            dry_run=True, ai_enabled=False, hands_free=False, gemini_api_key=None, recovery_message=message)
+        self.registry.dry_run = True
+        self.permissions.clear_session()
+        self.followup.clear()
+        for name in ("_gemini", "_ollama"):
+            provider = getattr(self, name, None)
+            setattr(self, name, None)
+            self._retire_provider(provider)
+        self.audit.write("settings_recovery_required", error="credential_settings_unconfirmed")
+
+    def _close_provider(self, provider) -> bool:
+        try:
+            close = getattr(provider, "close", None)
+            if close and close() is False:
+                self.audit.write("provider_cleanup_failed", error="cleanup_incomplete")
+                return False
+            return True
+        except Exception as exc:
+            self.audit.write("provider_cleanup_failed", error=type(exc).__name__)
+            return False
+
+    def _retire_provider(self, provider) -> None:
+        if provider is None:
+            return
+        if not any(item is provider for item in self._retired_providers):
+            self._retired_providers.append(provider)
+        if self._close_provider(provider):
+            self._retired_providers[:] = [item for item in self._retired_providers if item is not provider]
+
+    def _retry_retired_providers(self) -> bool:
+        for provider in tuple(self._retired_providers):
+            if self._close_provider(provider):
+                self._retired_providers[:] = [item for item in self._retired_providers if item is not provider]
+        return not self._retired_providers
+
+    def close(self) -> bool:
+        # Cleanup must not close an SDK client while the task holding it is in
+        # flight. The existing cleanup worker presents an explicit Retry path.
+        if not self._task_lock.acquire(blocking=False):
+            return False
+        try:
+            if self._task_depth:
+                return False
+            reminders_cleaned = True
+            if hasattr(self, "reminder_store") and self.reminder_store:
+                reminders_cleaned = self.reminder_store.stop()
+            provider_cleaned = self._retry_retired_providers()
+            for name in ("_gemini", "_ollama"):
+                provider = getattr(self, name, None)
+                if self._close_provider(provider):
+                    setattr(self, name, None)
+                else:
+                    provider_cleaned = False
+            browser_cleaned = self._browser.close()
+            return browser_cleaned and provider_cleaned and reminders_cleaned
         finally:
             self._task_lock.release()
 
-    def close(self) -> bool:
-        return self._browser.close()
-
     def handle(self, text: str, approval_callback=None, token=None) -> AssistantTurn:
+        from .state import CancellationToken
+        token = token or CancellationToken()
         with self._task_lock:
+            self._task_depth += 1
             self.last_timing = StageTimer(command_id=getattr(token, "command_id", uuid.uuid4().hex))
             self.last_timing.start("task_total")
             try:
                 return self._handle(text, approval_callback, token)
             finally:
                 self.last_timing.end("task_total")
+                self._task_depth -= 1
 
     def _handle(
         self,
@@ -506,10 +682,15 @@ class AerisAssistant:
         token: Any = None,
     ) -> AssistantTurn:
         user_text = text.strip()
+        private_request = user_text.lower().startswith("/private ")
+        if private_request:
+            user_text = user_text[len("/private "):].strip()
 
-        if self.permissions.stopped and user_text.lower() not in {"status", "aeris status", "system status", "resume", "resume aeris", "start aeris"}:
-            result = ActionResult(False, "Global Stop is active. Explicitly resume Aeris first.", error="kill_switch")
-            return AssistantTurn(user_text, result.message, [result])
+        if self.permissions.stopped:
+            stopped_plan = self.router.route(user_text)
+            if not stopped_plan or not stopped_plan.actions or any(action.tool not in {"system.status", "system.resume"} for action in stopped_plan.actions):
+                result = ActionResult(False, "Global Stop is active. Explicitly resume Aeris first.", error="kill_switch")
+                return AssistantTurn(user_text, result.message, [result], status="failed")
         
         if token:
             token.raise_if_cancelled()
@@ -519,7 +700,20 @@ class AerisAssistant:
             return self._daily_brief(user_text, approval_callback, token)
             
         self.last_timing.start("routing")
-        plan = self.followup.resolve(user_text, self.registry.dry_run)
+        routine_name = None
+        addressed = self.router.wake_word
+        from .activation import strip_address
+        routine_command = strip_address(user_text, (addressed,)).strip()
+        plan = None
+        if routine_command.lower().startswith('run routine '):
+            routine_name = routine_command[len('run routine '):].strip()
+            try:
+                routine = self.routine_store.get(routine_name, scope_fingerprint(self.config))
+                plan = PlannedResponse(steps=routine.steps)
+            except ValueError as exc:
+                return AssistantTurn(user_text, str(exc), status='failed')
+        if plan is None:
+            plan = self.followup.resolve(user_text, self.registry.dry_run)
         if plan is None:
             plan = self.router.route(user_text)
         self.last_timing.end("routing")
@@ -530,35 +724,56 @@ class AerisAssistant:
                 "Share this request with the configured cloud planner?\n" + user_text[:2000] +
                 "\nOnly explicitly SHAREABLE history is included; no files or screenshots are attached.",
             ):
-                return AssistantTurn(user_text, "Cloud sharing was not approved. Local commands remain available.")
+                return AssistantTurn(user_text, "Cloud sharing was not approved. Local commands remain available.", status="failed")
             if token:
                 token.raise_if_cancelled()
             try:
                 plan = self._gemini.plan(user_text, self.registry.definitions(), self.memory.provider_context(8), token)
+            except CancelledError:
+                return AssistantTurn(user_text, "Command cancelled before any tool ran.", status="cancelled")
             except Exception as exc:
                 self.audit.write("gemini_planner_failed", error=type(exc).__name__)
                 if self._is_network_error(exc) and self._ollama is not None:
                     # Fallback to offline planner
                     try:
                         plan = self._ollama.plan(user_text, self.registry.definitions(), self.memory.recent(8), token)
+                    except CancelledError:
+                        return AssistantTurn(user_text, "Command cancelled before any tool ran.", status="cancelled")
                     except Exception as ollama_exc:
-                        self.audit.write("ollama_planner_failed", error=str(ollama_exc))
-                        plan = PlannedResponse(reply=self._planner_failure_message(exc))
+                        self.audit.write("ollama_planner_failed", error=type(ollama_exc).__name__)
+                        plan = PlannedResponse(reply=self._planner_failure_message(exc), error="planner_failed")
                 else:
-                    plan = PlannedResponse(reply=self._planner_failure_message(exc))
+                    plan = PlannedResponse(reply=self._planner_failure_message(exc), error="planner_failed")
         elif plan is None and self._ollama is not None:
             try:
                 plan = self._ollama.plan(user_text, self.registry.definitions(), self.memory.recent(8), token)
+            except CancelledError:
+                return AssistantTurn(user_text, "Command cancelled before any tool ran.", status="cancelled")
             except Exception as exc:
-                self.audit.write("ollama_planner_failed", error=str(exc))
-                plan = PlannedResponse(reply="Ollama offline planner failed. Say 'help' for local commands.")
+                self.audit.write("ollama_planner_failed", error=type(exc).__name__)
+                plan = PlannedResponse(reply="Ollama offline planner failed. Say 'help' for local commands.", error="planner_failed")
         elif plan is None:
             plan = PlannedResponse(
                 reply="I do not know that command yet. Say 'help', or configure GEMINI_API_KEY for flexible requests."
             )
 
-        sensitive = any(
+        if token and token.is_cancelled:
+            return AssistantTurn(user_text, "Command cancelled before any tool ran; late planner output discarded.", status="cancelled")
+
+        if plan.steps:
+            plan.actions = [ActionRequest(step.tool, step.arguments, user_text) for step in plan.steps]
+        task_plan = None
+        if plan.actions:
+            try:
+                task_plan = TaskPlan(steps=plan.steps) if plan.steps else TaskPlan.from_actions(plan.actions)
+                task_plan.preflight(self.registry)
+            except (ValueError, TypeError, KeyError):
+                return AssistantTurn(user_text, 'The complete task could not be validated. No steps ran.',
+                    [ActionResult(False, 'Invalid task plan or arguments.', error='invalid_arguments')], status='failed')
+
+        sensitive = private_request or any(
             action.tool.startswith("email.")
+            or action.tool.startswith("reminder.")
             or action.tool.startswith("desktop.clipboard")
             or action.tool.startswith("vision.")
             or action.tool.startswith("coding.")
@@ -570,26 +785,97 @@ class AerisAssistant:
 
         results: list[ActionResult] = []
         lines = [plan.reply] if plan.reply else []
-        for action in plan.actions:
-            if token:
-                token.raise_if_cancelled()
+        task_id, progress = self.task_journal.begin(task_plan) if task_plan else (None, [])
+        deadline = time.monotonic() + task_plan.timeout_seconds if task_plan else None
+        if token and deadline:
+            token.deadline = min(token.deadline, deadline) if token.deadline else deadline
+        resolved_results = {}
+        resolved_actions = []
+        journal_failed = False
+        def report(status='running'):
+            nonlocal journal_failed
+            if not task_id:
+                return
+            try:
+                self.task_journal.update(task_id, progress, status)
+            except Exception:
+                journal_failed = True
+            callback = getattr(token, 'progress_callback', None)
+            if callback:
+                try:
+                    callback({'task_id': task_id, 'status': status, 'steps': [dict(item) for item in progress]})
+                except Exception:
+                    pass  # A presentation failure must not discard committed receipts.
+        report()
+        for index, step in enumerate(task_plan.steps if task_plan else []):
+            try:
+                action = task_plan.resolve(step, resolved_results, user_text)
+            except ValueError:
+                results.append(ActionResult(False, 'A required observed output is unavailable. Remaining steps were blocked.', error='missing_output'))
+                progress[index]['status'] = 'blocked'
+                lines.append('[FAILED] ' + results[-1].message)
+                break
+            resolved_actions.append(action)
+            progress[index]['status'] = 'executing'
+            report()
             self.last_timing.start("permission_and_tool_" + action.request_id)
-            result = self.registry.execute(action, approval_callback, token=token)
-            self.last_timing.end("permission_and_tool_" + action.request_id)
+            try:
+                if token:
+                    token.raise_if_cancelled()
+                if time.monotonic() >= deadline:
+                    raise CancelledError('Task deadline exceeded')
+                with self.permissions.reviewed_workflow(routine_name is not None):
+                    result = self.registry.execute(action, approval_callback, token=token)
+            except CancelledError:
+                result = ActionResult(False, "Remaining work cancelled; prior effects are retained below.", error="cancelled")
+            finally:
+                self.last_timing.end("permission_and_tool_" + action.request_id)
             results.append(result)
+            resolved_results[step.id] = result
+            progress[index]['status'] = ('simulated' if result.dry_run else 'completed') if result.success else ('cancelled' if result.error == 'cancelled' else 'failed')
+            progress[index]['published'] = bool(result.data.get('published'))
+            progress[index]['uncertain'] = bool(result.data.get('uncertain') or result.data.get('outcome_uncertain'))
+            progress[index]['error'] = result.error if result.error is None or re.fullmatch(r'[a-z_]{1,60}', result.error) else 'adapter_error'
+            receipt_keys = {'path', 'source', 'destination', 'batch_id', 'sha256', 'source_removed',
+                            'verified', 'cleanup_complete', 'characters_dispatched', 'input_events_inserted'}
+            progress[index]['receipt'] = {key: value for key, value in result.data.items() if key in receipt_keys
+                and (type(value) in {bool, int} or isinstance(value, str) and len(value) <= 8192)}
+            report()
+            if journal_failed and index + 1 < len(task_plan.steps):
+                lines.append('Further steps were blocked because durable task history is unavailable. Retained results follow.')
             prefix = "[OK]" if result.success else "[FAILED]"
             lines.append(f"{prefix} {result.message}")
             details = self._visible_details(action, result)
             if details:
                 lines.append(details)
-            if not result.success:
+            if not result.success or journal_failed or (token and token.is_cancelled):
                 lines.append("Remaining steps were not run because a required step failed.")
                 break
 
         reply = "\n".join(line for line in lines if line).strip() or "Done."
-        self.followup.observe(plan.actions, results)
+        if token and token.is_cancelled:
+            self.followup.clear()
+            reply += "\nCommand cancelled. Effects already reported above are retained; cancellation does not undo them."
+        else:
+            self.followup.observe(resolved_actions, results)
         self.memory.add("assistant", reply[:10_000], classification="SENSITIVE" if sensitive else "LOCAL_ONLY")
-        return AssistantTurn(input_text=user_text, reply=reply, results=results)
+        status = "failed" if plan.error or any(not result.success for result in results) or journal_failed and any(item['status'] == 'pending' for item in progress) else "completed"
+        if token and token.is_cancelled:
+            status = "cancelled"
+        elif results and all(result.dry_run for result in results):
+            status = "simulated"
+        for item in progress:
+            if item['status'] == 'pending':
+                item['status'] = 'blocked'
+        report(status)
+        if routine_name:
+            try:
+                self.routine_store.result(routine_name, status)
+            except Exception:
+                journal_failed = True
+        if journal_failed:
+            reply += '\nTask history could not be fully saved. Preserve this result and review interrupted work before retrying.'
+        return AssistantTurn(input_text=user_text, reply=reply, results=results, status=status, task_id=task_id)
 
     def _daily_brief(self, text, approval_callback, token) -> AssistantTurn:
         """Deterministic, local rendering of fetched records; never a cloud summary."""
@@ -607,8 +893,17 @@ class AerisAssistant:
                 lines.append(self._visible_details(action, result) or "No records returned.")
             if self.permissions.stopped or (token and token.is_cancelled):
                 break
-        lines.append("Sources: authorized primary Calendar / connected Gmail. No cloud summary or sending. "
-                     "Reminders are not included: durable scheduling is not implemented.")
+
+        if not (self.permissions.stopped or (token and token.is_cancelled)):
+            rem_action = ActionRequest("reminder.list", {}, source_text=text)
+            rem_result = self.registry.execute(rem_action, approval_callback, token=token)
+            results.append(rem_result)
+            lines.append("Pending reminders: " + rem_result.message)
+
+        lines.append(
+            "Sources: authorized primary Calendar / connected Gmail / local durable ReminderStore. "
+            "No cloud summary or sending."
+        )
         return AssistantTurn(text, "\n".join(lines), results)
 
     @staticmethod
@@ -641,8 +936,28 @@ class AerisAssistant:
         if result.dry_run:
             return ""
         data = result.data
+        if action.tool == "desktop.type_text" and data.get("input_events_inserted"):
+            return (f"Input events inserted: {data['input_events_inserted']}; complete characters dispatched: "
+                    f"{data.get('characters_dispatched', 0)} to window {data.get('window_id')}. "
+                    "Text was not read back. Inspect the selected application before retrying.")
+        if action.tool in {"files.copy", "files.move"} and (data.get("published") or data.get("created_directories")):
+            lines = ["Destination published: " + str(data.get("destination"))] if data.get("published") else []
+            lines.append("Source: " + str(data.get("source")) +
+                         (" (removed by the owned move)" if data.get("source_removed") else
+                          " (removal unverified)" if data.get("outcome_uncertain") else " (retained)"))
+            if data.get("created_directories"):
+                lines.append("Created folders: " + ", ".join(data["created_directories"]))
+            if data.get("outcome_uncertain") or data.get("staging_cleanup_incomplete"):
+                lines.append("Cleanup or source removal is uncertain; inspect both paths before retrying.")
+            return "\n".join(lines)
+        if action.tool.startswith("reminder.") and data.get("reminder_id"):
+            return "Reminder ID: " + str(data["reminder_id"])
         if action.tool.startswith("packages.") and data.get("output"):
             return str(data["output"])
+        if data.get("published") and (not result.success or action.tool != "coding.create_project"):
+            return "Retained artifact: " + str(data.get("path") or data.get("project_path") or data.get("destination") or "See action result")
+        if data.get("uncertain") or data.get("cleanup_complete") is False:
+            return "External effects or cleanup are uncertain. Inspect the target before retrying."
         if not result.success:
             return ""
         if action.tool == "browser.advanced_extract":
@@ -652,6 +967,7 @@ class AerisAssistant:
         if action.tool == "calendar.list_events":
             return "\n".join(
                 f"- {item.get('summary', '(Untitled)')} | {item.get('start', '')} | {item.get('end', '')}"
+                + (" (all day; end date is exclusive)" if item.get("all_day") else "")
                 for item in data.get("events", [])
             ) or "No upcoming events found."
         if action.tool == "files.find":

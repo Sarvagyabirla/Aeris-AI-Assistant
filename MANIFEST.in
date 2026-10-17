@@ -1,0 +1,14 @@
+include LICENSE
+include config/apps.windows.json
+include config/packages.windows.json
+include scripts/build_resources.py
+include scripts/check_wheel.py
+include scripts/setup_windows.ps1
+include START_AERIS.bat
+include RUN_AERIS.bat
+include SETUP_AERIS.bat
+include BUILD_AERIS.bat
+include run_aeris.py
+include requirements*.txt
+include uv.lock
+recursive-include tests *.py

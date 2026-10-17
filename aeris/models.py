@@ -51,6 +51,8 @@ class ActionResult:
 class PlannedResponse:
     reply: str = ""
     actions: list[ActionRequest] = field(default_factory=list)
+    error: str | None = None
+    steps: list[Any] = field(default_factory=list)
 
 
 @dataclass
@@ -58,6 +60,12 @@ class AssistantTurn:
     input_text: str
     reply: str
     results: list[ActionResult] = field(default_factory=list)
+    status: str = "completed"
+    task_id: str | None = None
+
+    @property
+    def success(self) -> bool:
+        return self.status in {"completed", "simulated"} and all(result.success for result in self.results)
 
     def spoken_summary(self) -> str:
         """Speak observed outcome, never an earlier planner promise."""

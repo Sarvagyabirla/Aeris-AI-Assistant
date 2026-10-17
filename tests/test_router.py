@@ -56,7 +56,7 @@ from aeris.router import LocalRouter, has_wake_word, strip_wake_word
         ("screenshot le lo", "desktop.screenshot", None, None),
         ("downloads folder kholo", "downloads.open_folder", None, None),
         ("computer lock karo", "system.lock", None, None),
-        ("Aeris, pause the song", "desktop.media_control", "action", "play_pause"),
+        ("Aeris, pause the song", "desktop.media_control", "action", "pause"),
     ],
 )
 def test_common_routes(command, tool, key, value):

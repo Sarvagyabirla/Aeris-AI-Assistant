@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from aeris.tools.filesystem import FilesystemTools, PathGuard
@@ -61,6 +63,11 @@ def test_create_copy_and_move_do_not_overwrite(tmp_path):
     copied = tools.copy_file({"source": "notes.txt", "destination": "copy.txt"})
     assert copied.success
     moved = tools.move_file({"source": "copy.txt", "destination": "archive/moved.txt"})
+    if os.name != "nt":
+        assert not moved.success and moved.error == "unsupported_safe_move"
+        assert (tmp_path / "copy.txt").read_text(encoding="utf-8") == "hello"
+        assert not (tmp_path / "archive").exists()
+        return
     assert moved.success
     assert not (tmp_path / "copy.txt").exists()
     assert (tmp_path / "archive" / "moved.txt").read_text(encoding="utf-8") == "hello"

@@ -81,10 +81,11 @@ class PackageTools:
             )
         
         completed = run_owned([executable, *arguments], timeout=timeout, token=token)
-        if completed.reason:
+        if completed.reason or not completed.cleanup_complete:
             return ActionResult(False, "Package command interrupted. Installation state may be uncertain; inspect before retrying.",
-                data={"cleanup_complete": completed.cleanup_complete, "uncertain": arguments[0] in {"install", "uninstall", "upgrade"}},
-                error=completed.reason)
+                data={"cleanup_complete": completed.cleanup_complete, "ownership": completed.ownership,
+                      "uncertain": arguments[0] in {"install", "uninstall", "upgrade"}},
+                error=completed.reason or "cleanup_incomplete")
         output = self._clean_output(completed.output)
         if completed.returncode != 0:
             return ActionResult(
@@ -93,7 +94,7 @@ class PackageTools:
                 data={"output": output},
                 error=f"winget_exit_{completed.returncode}",
             )
-        return ActionResult(True, "Windows Package Manager completed the request.", data={"output": output})
+        return ActionResult(True, "Windows Package Manager completed the request.", data={"output": output, "ownership": completed.ownership})
 
     def search(self, arguments: dict[str, object], token=None) -> ActionResult:
         try:

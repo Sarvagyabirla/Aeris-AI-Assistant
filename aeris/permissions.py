@@ -3,9 +3,11 @@ from __future__ import annotations
 import secrets
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Callable
 
+from .access import AccessProfile
 from .models import ActionRequest, PermissionLevel
 from .state import app_store
 
@@ -55,6 +57,9 @@ class AuthorizationDecision:
 
 class PermissionEngine:
     def __init__(self, approval_manager: ApprovalManager | None = None):
+        self.mode = 'task'
+        self.profile = AccessProfile()
+        self._workflow_context = threading.local()
         self.approvals = approval_manager or ApprovalManager()
         self._session_approvals: dict[str, float] = {}
         self._generation = 0
@@ -76,6 +81,8 @@ class PermissionEngine:
     def resume(self) -> None:
         with self._lock:
             self._kill_switch = False
+            self._generation += 1
+            self._session_approvals.clear()
             app_store.set("kill_switch_active", False)
 
     def clear_session(self) -> None:
@@ -83,12 +90,27 @@ class PermissionEngine:
             self._session_approvals.clear()
             self._generation += 1
 
+    @contextmanager
+    def reviewed_workflow(self, active):
+        previous = getattr(self._workflow_context, 'active', False)
+        self._workflow_context.active = bool(active)
+        try:
+            yield
+        finally:
+            self._workflow_context.active = previous
+
     def authorize(
         self,
         request: ActionRequest,
         level: PermissionLevel,
         callback: ApprovalCallback | None,
     ) -> AuthorizationDecision:
+        if not self.profile.allows(request.tool):
+            return AuthorizationDecision(False, 'This capability category is revoked. Review Permissions to grant it again.')
+        if self.mode == 'trusted' and not getattr(self._workflow_context, 'active', False) and request.tool not in {'system.status', 'system.stop', 'system.resume', 'system.health', 'system.battery', 'reminder.list'}:
+            return AuthorizationDecision(False, 'Trusted Routines mode requires an explicitly reviewed routine. Select Task Automation for an ad hoc goal.')
+        if self.mode == 'assist' and level in {PermissionLevel.AUTO, PermissionLevel.SESSION} and request.tool not in {'system.stop', 'system.resume', 'system.status', 'system.health', 'system.battery', 'reminder.list'}:
+            level = PermissionLevel.CONFIRM
         if self.stopped and request.tool not in {"system.status", "system.resume"}:
             return AuthorizationDecision(False, "Kill switch is active. Action blocked.")
 
@@ -106,6 +128,8 @@ class PermissionEngine:
         if level is PermissionLevel.SESSION:
             fingerprint = request.fingerprint()
             with self._lock:
+                now = time.monotonic()
+                self._session_approvals = {key: expiry for key, expiry in self._session_approvals.items() if expiry > now}
                 generation = self._generation
                 if self._session_approvals.get(fingerprint, 0) > time.monotonic():
                     return AuthorizationDecision(True, "Approved for this exact scope until expiry.")

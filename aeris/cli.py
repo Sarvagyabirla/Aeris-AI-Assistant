@@ -20,6 +20,8 @@ def _acquire_gui_instance() -> bool:
     kernel32 = ctypes.windll.kernel32
     kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
     kernel32.CreateMutexW.restype = ctypes.c_void_p
+    kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel32.CloseHandle.restype = ctypes.c_bool
     handle = kernel32.CreateMutexW(None, False, "Local\\AerisCognitiveDesktop")
     if not handle:
         return True
@@ -77,8 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
 def _assistant_from_args(args: argparse.Namespace) -> AerisAssistant:
     loaded = AerisConfig.load()
     config = loaded.with_overrides(
-        dry_run=loaded.dry_run if args.dry_run is None else args.dry_run,
-        ai_enabled=loaded.ai_enabled and not args.no_ai,
+        dry_run=True if loaded.recovery_message else loaded.dry_run if args.dry_run is None else args.dry_run,
+        ai_enabled=loaded.ai_enabled and not args.no_ai and not loaded.recovery_message,
     )
     return AerisAssistant(config)
 
@@ -126,7 +128,7 @@ def voice_loop(assistant: AerisAssistant) -> int:
         turn = assistant.handle(text, approval_prompt)
         print(f"Aeris > {turn.reply}")
         try:
-            voice.speak(turn.reply.splitlines()[0][:500])
+            voice.speak(turn.spoken_summary())
         except VoiceUnavailableError:
             pass
 
@@ -138,6 +140,16 @@ def main(argv: list[str] | None = None) -> int:
         from .diagnostics import run_diagnostics
         return run_diagnostics()
 
+    if args.gui and not _acquire_gui_instance():
+        try:
+            from .ui.single_instance import request_existing_window
+            restored = request_existing_window()
+        except ImportError:
+            restored = False
+        if not restored and os.name == 'nt':
+            ctypes.windll.user32.MessageBoxW(0, 'Aeris is already running. Use its tray menu or Ctrl+Alt+A to restore it.', 'Aeris', 0x40)
+        return 0
+
     try:
         assistant = _assistant_from_args(args)
     except Exception:
@@ -148,10 +160,6 @@ def main(argv: list[str] | None = None) -> int:
             print(message, file=sys.stderr)
         return 1
     if args.gui:
-        if not _acquire_gui_instance():
-            if os.name == "nt":
-                ctypes.windll.user32.MessageBoxW(0, "Aeris is already running.", "Aeris", 0x40)
-            return 0
         try:
             from .ui import launch_desktop
             return launch_desktop(assistant)
@@ -163,12 +171,19 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"GUI startup error: {type(e).__name__}", file=sys.stderr)
             return 1
     if args.once:
-        turn = assistant.handle(args.once, approval_prompt)
-        print(turn.reply)
-        return 0 if all(result.success for result in turn.results) else 1
-    if args.voice:
-        return voice_loop(assistant)
-    return text_loop(assistant)
+        try:
+            turn = assistant.handle(args.once, approval_prompt)
+            print(turn.reply)
+            return 0 if turn.success else 1
+        finally:
+            assistant.close()
+    try:
+        return voice_loop(assistant) if args.voice else text_loop(assistant)
+    finally:
+        if args.voice:
+            from .core.tts_worker import global_tts
+            global_tts.shutdown()
+        assistant.close()
 
 
 if __name__ == "__main__":

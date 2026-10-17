@@ -1,0 +1,8 @@
+﻿{
+    "build":  "offline --no-index --no-deps --no-build-isolation",
+    "catalogs_present":  true,
+    "excluded_artifacts":  0,
+    "sha256":  "422eec158b22390cfc456e1a500de5e9c59a3d7aa63f05e5d1620c6822ac8218",
+    "imports":  "core and optional UI",
+    "frozen":  false
+}

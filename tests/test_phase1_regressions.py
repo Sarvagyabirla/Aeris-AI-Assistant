@@ -2,6 +2,7 @@ import builtins
 import json
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from test_assistant import make_config
@@ -71,6 +72,8 @@ def test_global_stop_survives_settings_application(tmp_path, monkeypatch):
 def test_broken_portaudio_import_is_useful_voice_error(monkeypatch):
     original = builtins.__import__
     def importing(name, *args, **kwargs):
+        if name == "numpy":
+            return SimpleNamespace()  # Import isolation: portable core has no NumPy.
         if name == "sounddevice":
             raise OSError("PortAudio library not found")
         return original(name, *args, **kwargs)

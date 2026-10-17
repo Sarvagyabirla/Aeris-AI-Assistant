@@ -1,8 +1,9 @@
 """Capture the real Qt UI with temporary simulation data; no microphone/network."""
+import argparse
 import os
-import sys
 import tempfile
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -16,7 +17,15 @@ from aeris.ui.desktop import AerisMainWindow
 
 
 def main():
-    destination = Path(sys.argv[1]).resolve()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("destination", type=Path)
+    parser.add_argument("--view", choices=("dashboard", "reminders", "companion", "tasks", "permissions"), default="dashboard")
+    parser.add_argument("--width", type=int, default=1280)
+    parser.add_argument("--height", type=int, default=720)
+    args = parser.parse_args()
+    if not 640 <= args.width <= 3840 or not 480 <= args.height <= 2160:
+        parser.error("Choose a supported fixture size")
+    destination = args.destination.resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
     app = QApplication([])
     if os.name == "nt":
@@ -30,7 +39,7 @@ def main():
         assistant = AerisAssistant(AerisConfig(data_dir=root / "data", allowed_paths=(root,),
             dry_run=True, ai_enabled=False, hands_free=False, startup_greeting=False, coding_workspace=root))
         window = AerisMainWindow(assistant)
-        window.resize(1100, 700)
+        window.resize(args.width, args.height)
         window.show()
         window.dashboard.input_field.setText("open notepad")
         window.dashboard.send_command()
@@ -40,10 +49,33 @@ def main():
             time.sleep(0.01)
         if window.dashboard.chat_history.count() < 2:
             raise RuntimeError("Fixture command did not finish")
+        deadline = time.monotonic() + 2
+        while (window.worker.current_token is not None or "Audio: disabled" not in window.voice_label.text()) and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        if args.view == "reminders":
+            assistant.reminder_store.add("Fixture: review study notes", datetime.now(timezone.utc) + timedelta(minutes=30))
+            window.tabs.setCurrentWidget(window.reminders_view)
+            window.reminders_view.refresh()
+            deadline = time.monotonic() + 5
+            while window.reminders_view.records.count() == 0 and time.monotonic() < deadline:
+                app.processEvents()
+                time.sleep(0.01)
+            if window.reminders_view.records.count() == 0:
+                raise RuntimeError("Fixture reminder did not appear")
+        if args.view == 'tasks':
+            window.tabs.setCurrentWidget(window.tasks_view)
+            window.tasks_view.study_template()
+        if args.view == 'permissions':
+            window.tabs.setCurrentWidget(window.permissions_view)
+        capture = window
+        if args.view == 'companion':
+            window.show_companion()
+            capture = window.companion
         app.processEvents()
-        if not window.grab().save(str(destination)):
+        if not capture.grab().save(str(destination)):
             raise RuntimeError("Screenshot could not be saved")
-        window.close()
+        window.quit_application()
         deadline = time.monotonic() + 5
         while window.isVisible() and time.monotonic() < deadline:
             app.processEvents()

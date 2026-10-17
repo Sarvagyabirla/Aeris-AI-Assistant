@@ -39,7 +39,12 @@ def _default_allowed_paths() -> tuple[Path, ...]:
 
 
 def resource_root() -> Path:
-    return Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    project_root = Path(__file__).resolve().parent.parent
+    if (project_root / "config" / "apps.windows.json").is_file():
+        return project_root
+    return Path(__file__).resolve().parent / "resources"
 
 
 def _atomic_settings(path: Path, settings: dict) -> None:
@@ -53,6 +58,22 @@ def _atomic_settings(path: Path, settings: dict) -> None:
         os.replace(temporary, path)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+class SettingsRecoveryError(RuntimeError):
+    """Credential and settings publication could not be confirmed together."""
+
+
+def _credential_recovery_file(data_dir: Path) -> Path:
+    return data_dir / "credential-recovery.json"
+
+
+def _credential_recovery_message() -> str:
+    return (
+        "Credential/settings recovery is required. Simulation enabled; AI and listening disabled. "
+        "Repair credential storage, then explicitly replace or clear the Gemini key and save Settings. "
+        "Existing files are preserved."
+    )
 
 
 @dataclass
@@ -79,6 +100,8 @@ class AerisConfig:
     startup_greeting: bool = True
     coding_workspace: Path = Path.home() / "Documents" / "Aeris Projects"
     recovery_message: str = ""
+    timezone_name: str = "Asia/Kolkata"
+    automation_mode: str = 'task'
 
     @property
     def audit_log(self) -> Path:
@@ -109,24 +132,73 @@ class AerisConfig:
                         raise ValueError("Invalid saved numeric bound")
                 for name in ("allowed_paths", "allowed_domains", "voice_device", "voice_language", "voice_model", "wake_word",
                              "coding_workspace", "download_dir", "gemini_model", "gmail_credentials_file",
-                             "app_catalog_file", "package_catalog_file"):
+                             "app_catalog_file", "package_catalog_file", "timezone_name"):
                     if name in settings and not isinstance(settings[name], str):
                         raise ValueError("Invalid saved string")
                 if "voice_device" in settings and settings["voice_device"] not in {"cpu", "cuda", "auto"}:
                     raise ValueError("Invalid saved device")
                 if "wake_word" in settings and not 1 <= len(settings["wake_word"].strip()) <= 80:
                     raise ValueError("Invalid saved wake phrase")
+                if 'automation_mode' in settings and (not isinstance(settings['automation_mode'], str) or settings['automation_mode'] not in {'assist', 'task', 'trusted'}):
+                    raise ValueError('Invalid automation mode')
             except (OSError, ValueError):
                 warnings.warn("Settings unreadable: simulation enabled and file access disabled.", RuntimeWarning)
                 recovery_message = "Settings are invalid. Original file preserved. Simulation, AI and listening disabled; repair settings.json."
                 settings = {"allowed_paths": "", "dry_run": True, "hands_free": False, "ai_enabled": False}
+        # Validate effective environment values before converting them. Saved settings
+        # retain precedence. Never interpret an unknown boolean as permission for live use.
+        invalid_environment = False
+        if 'automation_mode' not in settings and os.getenv('AERIS_AUTOMATION_MODE', 'task') not in {'assist', 'task', 'trusted'}:
+            invalid_environment = True
+        for key, env_key in (("dry_run", "AERIS_DRY_RUN"), ("ai_enabled", "AERIS_AI_ENABLED"),
+                             ("hands_free", "AERIS_HANDS_FREE"), ("startup_greeting", "AERIS_STARTUP_GREETING"),
+                             ("require_signed_installers", "AERIS_REQUIRE_SIGNED_INSTALLERS")):
+            value = os.getenv(env_key)
+            if key not in settings and value is not None and value.strip().lower() not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+                invalid_environment = True
+        for key, env_key, minimum, maximum in (("voice_record_seconds", "AERIS_VOICE_SECONDS", 2, 30),
+                                                ("max_download_mb", "AERIS_MAX_DOWNLOAD_MB", 1, 2048)):
+            value = os.getenv(env_key)
+            if key not in settings and value is not None:
+                try:
+                    if not minimum <= int(value) <= maximum:
+                        invalid_environment = True
+                except ValueError:
+                    invalid_environment = True
+        if "voice_device" not in settings and os.getenv("AERIS_VOICE_DEVICE", "cpu").strip().lower() not in {"cpu", "cuda", "auto"}:
+            invalid_environment = True
+        if "wake_word" not in settings and not 1 <= len(os.getenv("AERIS_WAKE_WORD", "aeris").strip()) <= 80:
+            invalid_environment = True
+        if invalid_environment:
+            recovery_message = "Environment settings are invalid. Simulation enabled; AI, listening and file access disabled. Repair AERIS_* values or save valid Settings."
+            settings.update({"allowed_paths": "", "dry_run": True, "ai_enabled": False, "hands_free": False,
+                             "voice_record_seconds": 6, "max_download_mb": 2048, "voice_device": "cpu", "wake_word": "aeris"})
+            settings['automation_mode'] = 'assist'
+
         from .secrets import read_key, write_key
-        legacy_key = settings.get("gemini_api_key")
-        if legacy_key:
-            write_key(data_dir, legacy_key)
-            settings.pop("gemini_api_key")
-            _atomic_settings(settings_file, settings)
-        stored_key = read_key(data_dir)
+        recovery_file = _credential_recovery_file(data_dir)
+        # Existence, rather than trusting journal contents, is sufficient. A
+        # crash between the keyring and settings writes cannot prove agreement.
+        credential_unavailable = recovery_file.exists() or recovery_file.is_symlink()
+        stored_key = None
+        if credential_unavailable:
+            recovery_message = _credential_recovery_message()
+            settings.update({"dry_run": True, "ai_enabled": False, "hands_free": False})
+        else:
+            try:
+                legacy_key = settings.get("gemini_api_key")
+                if legacy_key:
+                    write_key(data_dir, legacy_key)
+                    migrated = {key: value for key, value in settings.items() if key != "gemini_api_key"}
+                    _atomic_settings(settings_file, migrated)
+                    settings = migrated
+                stored_key = read_key(data_dir)
+            except (RuntimeError, OSError):
+                # Keep original legacy settings on migration failure; never use an env key
+                # to silently bypass a failed credential backend.
+                credential_unavailable = True
+                recovery_message = "Credential storage is unavailable. Text commands remain available in simulation; AI and listening disabled. Repair the OS keyring backend, then retry Settings. Original data preserved."
+                settings.update({"dry_run": True, "ai_enabled": False, "hands_free": False})
                 
         def get_val(key: str, env_key: str, default: str) -> str:
             if key in settings and settings[key] is not None:
@@ -156,13 +228,21 @@ class AerisConfig:
         ) or ("*",)
 
         data_dir.mkdir(parents=True, exist_ok=True)
+        from .reminders import reminder_timezone
+        try:
+            reminder_timezone(get_val("timezone_name", "AERIS_TIMEZONE", "Asia/Kolkata"))
+        except ValueError:
+            recovery_message = "Reminder timezone is invalid or unavailable. Simulation enabled; AI/listening disabled. Choose a supported timezone in Settings."
+            settings.update({"timezone_name": "Asia/Kolkata", "dry_run": True, "ai_enabled": False, "hands_free": False})
         config = cls(
             data_dir=data_dir,
             recovery_message=recovery_message,
+            timezone_name=get_val("timezone_name", "AERIS_TIMEZONE", "Asia/Kolkata"),
+            automation_mode=get_val('automation_mode', 'AERIS_AUTOMATION_MODE', 'task'),
             allowed_paths=allowed_paths,
             dry_run=get_bool("dry_run", "AERIS_DRY_RUN", True),
             ai_enabled=get_bool("ai_enabled", "AERIS_AI_ENABLED", True),
-            gemini_api_key=stored_key or (None if settings.get("gemini_key_cleared") else os.getenv("GEMINI_API_KEY")) or None,
+            gemini_api_key=None if credential_unavailable else stored_key or (None if settings.get("gemini_key_cleared") else os.getenv("GEMINI_API_KEY")) or None,
             gemini_model=get_val("gemini_model", "AERIS_GEMINI_MODEL", "gemini-3.6-flash"),
             allowed_domains=domains,
             voice_model=get_val("voice_model", "AERIS_VOICE_MODEL", "small"),
@@ -192,6 +272,10 @@ class AerisConfig:
         return config
 
     def validate(self) -> None:
+        from .reminders import reminder_timezone
+        reminder_timezone(self.timezone_name)
+        if self.automation_mode not in {'assist', 'task', 'trusted'}:
+            raise ValueError('Unsupported automation mode')
         for name in ("dry_run", "ai_enabled", "hands_free", "startup_greeting", "require_signed_installers"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be boolean")
@@ -222,6 +306,7 @@ class AerisConfig:
             "hands_free": self.hands_free,
             "wake_word": self.wake_word,
             "coding_workspace": str(self.coding_workspace),
+            "timezone_name": self.timezone_name,
         }
 
     def save(self) -> None:
@@ -238,8 +323,8 @@ class AerisConfig:
                 
         if not isinstance(settings, dict):
             raise ValueError("Existing settings must be an object")
-        from .secrets import write_key
-        write_key(self.data_dir, self.gemini_api_key)
+        from .secrets import read_key, write_key
+        previous_key = read_key(self.data_dir)
         settings.pop("gemini_api_key", None)
         for key, value in asdict(self).items():
             if key in {"gemini_api_key", "data_dir", "recovery_message"}:
@@ -252,4 +337,29 @@ class AerisConfig:
                 value = ",".join(value)
             settings[key] = value
         settings["gemini_key_cleared"] = not bool(self.gemini_api_key)
-        _atomic_settings(settings_file, settings)
+        recovery_file = _credential_recovery_file(self.data_dir)
+        recovery_was_pending = recovery_file.exists() or recovery_file.is_symlink()
+        # A secret-free intent journal is durable before any key mutation. It
+        # deliberately contains neither old/new credentials nor their hashes.
+        _atomic_settings(recovery_file, {"version": 1, "state": "credential_settings_update_pending"})
+        try:
+            write_key(self.data_dir, self.gemini_api_key)
+            _atomic_settings(settings_file, settings)
+        except Exception as save_error:
+            try:
+                write_key(self.data_dir, previous_key)
+            except Exception as exc:
+                raise SettingsRecoveryError(_credential_recovery_message()) from exc
+            if recovery_was_pending:
+                # Restoring the previous key cannot resolve a transaction that
+                # was already uncertain before this explicit retry began.
+                raise SettingsRecoveryError(_credential_recovery_message()) from save_error
+            try:
+                recovery_file.unlink()
+            except OSError as exc:
+                raise SettingsRecoveryError(_credential_recovery_message()) from exc
+            raise
+        try:
+            recovery_file.unlink()
+        except OSError as exc:
+            raise SettingsRecoveryError(_credential_recovery_message()) from exc

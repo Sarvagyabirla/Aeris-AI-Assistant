@@ -1,0 +1,178 @@
+{
+  "procedure": "One controller warmup then repeated handle('open notepad'); simulated executor; temp database/audit; no cloud, app launch or audio.",
+  "python": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+  "os": "Windows-10-10.0.26200-SP0",
+  "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+  "dependencies": {
+    "pydantic": "2.13.5",
+    "PySide6": "6.11.2",
+    "pytest": "9.1.1"
+  },
+  "controller_construction_ms": 9.63929999852553,
+  "trials": 30,
+  "p50_total_ms": 4.973100003553554,
+  "p95_total_ms": 5.810100003145635,
+  "p95_routing_ms": 0.09259994840249419,
+  "failure_rate": 0.0,
+  "samples": [
+    {
+      "total_ms": 4.503300006035715,
+      "routing_ms": 0.08329999400302768,
+      "success": true
+    },
+    {
+      "total_ms": 4.5486000017262995,
+      "routing_ms": 0.08249998791143298,
+      "success": true
+    },
+    {
+      "total_ms": 4.600499989464879,
+      "routing_ms": 0.07040001219138503,
+      "success": true
+    },
+    {
+      "total_ms": 4.642000014428049,
+      "routing_ms": 0.07190002361312509,
+      "success": true
+    },
+    {
+      "total_ms": 4.489600018132478,
+      "routing_ms": 0.07660000119358301,
+      "success": true
+    },
+    {
+      "total_ms": 5.601400043815374,
+      "routing_ms": 0.069500005338341,
+      "success": true
+    },
+    {
+      "total_ms": 5.373899999540299,
+      "routing_ms": 0.09259994840249419,
+      "success": true
+    },
+    {
+      "total_ms": 4.785400000400841,
+      "routing_ms": 0.06859999848529696,
+      "success": true
+    },
+    {
+      "total_ms": 5.187399976421148,
+      "routing_ms": 0.0632999581284821,
+      "success": true
+    },
+    {
+      "total_ms": 5.12039999011904,
+      "routing_ms": 0.06690004374831915,
+      "success": true
+    },
+    {
+      "total_ms": 4.767100035678595,
+      "routing_ms": 0.06220000796020031,
+      "success": true
+    },
+    {
+      "total_ms": 4.921600047964603,
+      "routing_ms": 0.05870003951713443,
+      "success": true
+    },
+    {
+      "total_ms": 4.997800046112388,
+      "routing_ms": 0.06499997107312083,
+      "success": true
+    },
+    {
+      "total_ms": 4.930299997795373,
+      "routing_ms": 0.06499997107312083,
+      "success": true
+    },
+    {
+      "total_ms": 5.12190000154078,
+      "routing_ms": 0.058999983593821526,
+      "success": true
+    },
+    {
+      "total_ms": 5.217999976594001,
+      "routing_ms": 0.06739998934790492,
+      "success": true
+    },
+    {
+      "total_ms": 4.920100036542863,
+      "routing_ms": 0.07230002665892243,
+      "success": true
+    },
+    {
+      "total_ms": 5.095600034110248,
+      "routing_ms": 0.06980000762268901,
+      "success": true
+    },
+    {
+      "total_ms": 4.9483999609947205,
+      "routing_ms": 0.07019995246082544,
+      "success": true
+    },
+    {
+      "total_ms": 4.890899988822639,
+      "routing_ms": 0.06880000000819564,
+      "success": true
+    },
+    {
+      "total_ms": 6.459900003392249,
+      "routing_ms": 0.06449996726587415,
+      "success": true
+    },
+    {
+      "total_ms": 5.356199981179088,
+      "routing_ms": 0.06310001481324434,
+      "success": true
+    },
+    {
+      "total_ms": 5.810100003145635,
+      "routing_ms": 0.08379999781027436,
+      "success": true
+    },
+    {
+      "total_ms": 4.867199982982129,
+      "routing_ms": 0.06699998630210757,
+      "success": true
+    },
+    {
+      "total_ms": 5.245999956969172,
+      "routing_ms": 0.059999991208314896,
+      "success": true
+    },
+    {
+      "total_ms": 5.032300017774105,
+      "routing_ms": 0.2245000214315951,
+      "success": true
+    },
+    {
+      "total_ms": 4.712299967650324,
+      "routing_ms": 0.06160000339150429,
+      "success": true
+    },
+    {
+      "total_ms": 4.595300008077174,
+      "routing_ms": 0.05989999044686556,
+      "success": true
+    },
+    {
+      "total_ms": 5.68050000583753,
+      "routing_ms": 0.05500001134350896,
+      "success": true
+    },
+    {
+      "total_ms": 5.0898000481538475,
+      "routing_ms": 0.07370003731921315,
+      "success": true
+    }
+  ],
+  "not_measured": [
+    "cold/warm GUI start",
+    "voice",
+    "speech start",
+    "cloud",
+    "approval wait",
+    "actual device effects",
+    "idle/active CPU and RAM"
+  ]
+}

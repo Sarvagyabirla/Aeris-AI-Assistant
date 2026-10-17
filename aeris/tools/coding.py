@@ -378,6 +378,9 @@ Rules:
             return ActionResult(False, "File type not allowed.", error="unsupported_file_type")
             
         try:
+            initial_identity = target.stat()
+            if initial_identity.st_size > 2_000_000:
+                return ActionResult(False, "Patching is limited to 2 MB files.", error="file_too_large")
             original = target.read_bytes()
             expected = arguments.get("expected_sha256")
             if not expected or hashlib.sha256(original).hexdigest() != expected:
@@ -401,11 +404,23 @@ Rules:
                 if token:
                     token.raise_if_cancelled()
                 target = self._resolve_in_workspace(path_str)
-                if target.read_bytes() != original:
+                fresh_identity = target.stat()
+                if ((fresh_identity.st_dev, fresh_identity.st_ino, fresh_identity.st_mtime_ns, fresh_identity.st_size)
+                    != (initial_identity.st_dev, initial_identity.st_ino, initial_identity.st_mtime_ns, initial_identity.st_size)
+                    or target.read_bytes() != original):
                     return ActionResult(False, "File changed after preview.", error="stale_patch")
-                os.replace(temporary, target)
+                if token:
+                    token.commit(lambda: os.replace(temporary, target))
+                else:
+                    os.replace(temporary, target)
             finally:
                 Path(temporary).unlink(missing_ok=True)
-            return ActionResult(True, f"Applied diff to {target.name}", data={"path": str(target), "sha256": hashlib.sha256(updated_bytes).hexdigest()})
+            data = {"path": str(target), "sha256": hashlib.sha256(updated_bytes).hexdigest(), "published": True}
+            if token and token.is_cancelled:
+                return ActionResult(False, "Patch was published before cancellation; the changed file is retained.",
+                                    data=data, error="cancelled_after_publication")
+            return ActionResult(True, f"Applied diff to {target.name}", data=data)
+        except CancelledError:
+            return ActionResult(False, "Patch cancelled before publication; original file retained.", error="cancelled")
         except Exception as e:
             return ActionResult(False, f"Failed to apply diff: {e}", error="patch_error")

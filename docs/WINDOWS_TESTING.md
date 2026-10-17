@@ -1,135 +1,42 @@
-# Next supervised source-app checks (native/lifecycle increment)
+# Next supervised Windows acceptance - 17 October 2026
 
-Open START_AERIS.bat in SIMULATION; type `set volume to 35`, then `make it 40` and verify simulated
-volume wording. After 31 seconds the same follow-up must ask which control. Try Emergency Stop,
-confirm a subsequent command is blocked, then explicitly `resume Aeris`. Task Stop is separate.
-Save simulation settings and close during harmless fixture work; confirm responsive status and
-no repeated worker restart. Do not install software, run generated code or test a sensitive window.
-Real winget/UAC/Defender and microphone/SAPI checks require separate explicit supervision.
+These checks have NOT RUN on the user's desktop. Ordinary validation used disposable data,
+fake hardware/services, harmless owned subprocess fixtures and offscreen Qt. Native acceptance
+requires explicit supervision. Never use real mail, installs, power effects, private windows,
+credentials or generated-project execution merely to fill a table.
 
-# Follow-on supervised acceptance — 12 October 2026
+1. Launch normal parent START_AERIS.bat in SIMULATION. Character and controller should appear
+   without typing start; returning preferences must persist. Check visible microphone state,
+   saved mute, mode and reduced motion. No automatic installation/download/upload.
+2. Type `set volume to 50 and brightness to 20`: two simulation steps. Try `don't set volume
+   to 100`, quoted/conditional commands, -10, 35.5 and an unsupported compound: no effects.
+3. During a harmless simulated task, switch dashboard/companion. Verify same task state, Stop,
+   move/resize/on-top, minimize/tray and restore. Test Ctrl+Alt+A/S/Space, click-through recovery,
+   keyboard navigation and tray Quit. Confirm the overlay does not activate or block another
+   app. Record any shortcut registration conflict. Test 125/150/200% DPI, negative-monitor
+   coordinates and display disconnect/reconnect without changing resolution for a test.
+4. Review/save the Study template, then run it once in simulation from text and separately
+   voice. Inspect steps/history and disable it. Change scope/live mode or app mapping: the old
+   review must be rejected. No automatic trigger or account step should run.
+5. With separate live authorization, choose a disposable external Notepad window, record initial
+   volume, request `open Notepad, set volume to 35, and minimize this window`, inspect per-step
+   results and restore original volume. Confirm selected-window readback; app launch is not proof
+   of application control. Deny graceful close once, then verify Notepad retains its save prompt.
+6. With separate live authorization, create disposable documents on an additional hard-link-capable
+   drive. Grant exactly that folder, review one organization manifest, inspect results, introduce
+   an Undo conflict and verify no overwrite, resolve it and Undo, then revoke the scope/category
+   and confirm further work is denied after restart. Keep empty category folders for review.
+7. Microphone/SAPI acceptance separately: cached model only, wake grammar, noise, PTT, passive
+   TTS self-trigger gating and interruption. Measure UI Stop acknowledgment separately from
+   actual audio/native/model quiescence. Passive TTS gating is not certified acoustic barge-in.
+8. A harmless running-app reminder should notify once, survive restart/sleep as overdue, and
+   support snooze/cancel. Emergency Stop pauses tasks/reminders until Resume. No closed-app
+   delivery service is promised.
 
-Use `C:\AI Related project BY AI\AERIS_AI_ASSISTANT\Aeris\START_AERIS.bat`.
-Next safe check: launch in SIMULATION, type `open notepad`, confirm visible simulated outcome;
-inspect the Local memory tab using a deliberately non-private test sentence, correct then forget it.
-Do not enable LIVE or voice without intentional device consent. Daily Brief can be checked in
-SIMULATION without accounts/fetching; real retrieval requires designated accounts and approval.
-Supervise voice playback/Stop and close/reopen separately. Do not test installation, real mail,
-sensitive screen capture or generated host code merely to fill acceptance rows.
-No frozen executable is supplied; PyInstaller is absent. See the current validation scenario matrix
-and exact continuation checklist in IMPLEMENTATION_STATUS before broader live acceptance.
+Screen selector/redaction, browser target identity/peer enforcement, Gmail draft/OAuth workflow,
+immutable installer plan, multi-file coding Undo, semantic app adapters and frozen release need
+implementation before their end-to-end supervised acceptance. Full matrix: VALIDATION_REPORT.
+Source-wheel import is not clean-account executable acceptance. No frozen executable exists.
 
-# Windows manual test checklist
-
-Keep Aeris in dry-run mode for the first pass.
-
-## Installation
-
-- [ ] Python 3.11 is selected.
-- [ ] `SETUP_AERIS.bat` finishes successfully.
-- [ ] Automated tests pass.
-- [ ] `.env` contains no quotation marks around Windows paths.
-- [ ] Allowed paths match the actual Windows username.
-
-## Desktop interface
-
-- [ ] `START_AERIS.bat` opens one Aeris desktop window.
-- [ ] Text commands work through the input box and Send button.
-- [ ] Speak records and transcribes one command.
-- [ ] Safe/live mode changes only after confirmation.
-- [ ] Sensitive actions show a separate permission dialog.
-- [ ] Stop Aeris blocks actions and Resume restores them.
-- [ ] Settings opens the correct project `.env` file.
-- [ ] The animated Aeris character and telemetry appear without layout clipping.
-- [ ] HUD fullscreen and always-on-top controls work.
-- [ ] Character color/state changes for listening, thinking, executing, speaking, and stopped.
-
-## Wake listening
-
-- [ ] Aeris speaks one startup greeting.
-- [ ] The HUD visibly shows `WAKE LISTENING` while the microphone is active.
-- [ ] `Aeris, open Chrome` is accepted.
-- [ ] Ordinary speech without the Aeris wake name is ignored.
-- [ ] Turning off Wake Listening releases continuous standby while Speak still works.
-- [ ] Stop Aeris turns off wake listening.
-
-## Screen understanding
-
-- [ ] `look at my screen and explain this error` asks for session permission.
-- [ ] Denying permission sends no screenshot.
-- [ ] Approving analyzes only visible screens and shows the answer in the activity stream.
-- [ ] No screen capture file is left in the Aeris data or screenshot folder.
-
-## Coding projects
-
-- [ ] `write Python code for an expense tracker` shows the project request and workspace before confirmation.
-- [ ] The generated project appears under `AERIS_CODING_WORKSPACE` and opens in VS Code when available.
-- [ ] Running the same request again creates a new folder instead of overwriting.
-- [ ] Invalid Python/JSON/TOML output is repaired or rejected before files are committed.
-- [ ] Generated code and dependencies do not execute automatically.
-
-## Dry run
-
-- [ ] `python -m aeris --once "open chrome"` shows a dry-run action.
-- [ ] `python -m aeris --once "set volume to 40"` shows a dry-run action.
-- [ ] `python -m aeris --once "delete file test.txt"` asks for confirmation before simulating.
-- [ ] `stop Aeris` prevents later actions.
-- [ ] `resume Aeris` restores commands.
-
-## Live desktop controls
-
-- [ ] Chrome opens.
-- [ ] VS Code opens.
-- [ ] Volume increases, decreases, and sets an exact value.
-- [ ] Brightness changes on the internal display.
-- [ ] Play/pause and next/previous media keys work.
-- [ ] Screenshot asks for session permission and saves successfully.
-- [ ] Typing shows the complete text before confirmation.
-- [ ] Closing an app asks every time.
-- [ ] Show desktop, switch window, maximize, and minimize work.
-- [ ] Clipboard reading asks for session permission.
-- [ ] Computer health and battery status load.
-
-## Downloads and applications
-
-- [ ] A direct HTTPS test file asks for confirmation and appears in Downloads.
-- [ ] A second download with the same name does not overwrite the first.
-- [ ] A loopback/private-network URL is rejected.
-- [ ] `search apps for VLC` returns trusted `winget` results.
-- [ ] Installing or updating an app shows the exact package and asks every time.
-- [ ] A downloaded unsigned installer is rejected.
-- [ ] A signed installer asks in Aeris and then shows the normal Windows/UAC prompt.
-
-## Files
-
-- [ ] Find searches only configured allowed paths.
-- [ ] A path outside the allowed roots is rejected.
-- [ ] Reading a text file asks for session permission.
-- [ ] Executable files are blocked.
-- [ ] Delete moves a test file to the Recycle Bin after confirmation.
-- [ ] Creating, copying, or moving a file asks first and never overwrites an existing file.
-
-## Power actions
-
-- [ ] Lock and sleep ask every time.
-- [ ] Restart and shutdown ask every time and use a 10-second cancellation window.
-- [ ] `cancel shutdown` cancels a pending restart or shutdown.
-
-## Voice
-
-- [ ] The first run downloads the selected Whisper model.
-- [ ] The correct microphone is selected by Windows.
-- [ ] Push-to-talk transcribes a short English command.
-- [ ] Push-to-talk transcribes a short Hinglish command.
-- [ ] Aeris speaks the result.
-- [ ] Voice failure does not crash text mode.
-
-## Gmail
-
-- [ ] OAuth asks for Google consent without requesting a password inside Aeris.
-- [ ] Reading email asks for session permission.
-- [ ] Sending displays recipient, subject, and body.
-- [ ] Denying send leaves the mailbox unchanged.
-- [ ] Approving send returns a Gmail message ID.
-
-Do not enable startup-on-login until every relevant live test passes.
+Launch/check commands from parent: `.\START_AERIS.bat`, `.\AERIS.bat --test`,
+`.\AERIS.bat --lint`, `.\AERIS.bat --self-test`. Existing user data/settings are preserved.

@@ -1,3 +1,5 @@
+> Historical roadmap/design document. Current implemented behavior and blockers are in [IMPLEMENTATION_STATUS](IMPLEMENTATION_STATUS.md), [REQUIREMENTS_TRACEABILITY](REQUIREMENTS_TRACEABILITY.md) and [CONTINUATION](CONTINUATION.md). Checkboxes below are not current acceptance evidence.
+
 # Verification notice — 12 October 2026
 
 This older design map is not proof of implemented features. The current authoritative

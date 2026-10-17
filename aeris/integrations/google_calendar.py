@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..models import ActionResult
+from ..state import CancelledError
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
@@ -48,9 +49,11 @@ class GoogleCalendarClient:
         self._calendar = build("calendar", "v3", credentials=credentials, cache_discovery=False)
         return self._calendar
 
-    def list_events(self, arguments: dict[str, object]) -> ActionResult:
+    def list_events(self, arguments: dict[str, object], token=None) -> ActionResult:
         count = max(1, min(int(arguments.get("count", 10)), 50))
         try:
+            if token:
+                token.raise_if_cancelled()
             service = self._service()
             now = datetime.now(timezone.utc).isoformat()
             
@@ -59,6 +62,8 @@ class GoogleCalendarClient:
                 maxResults=count, singleEvents=True,
                 orderBy='startTime'
             ).execute()
+            if token:
+                token.raise_if_cancelled()
             
             events = events_result.get('items', [])
             summaries = []
@@ -69,9 +74,16 @@ class GoogleCalendarClient:
                     "id": event.get("id"),
                     "summary": event.get("summary", "(no summary)"),
                     "start": start,
+                    "end": event.get("end", {}).get("dateTime", event.get("end", {}).get("date")),
+                    "all_day": "date" in event.get("start", {}),
+                    "timezone": event.get("start", {}).get("timeZone", events_result.get("timeZone")),
                     "link": event.get("htmlLink", "")
                 })
                 
-            return ActionResult(True, f"Loaded {len(summaries)} upcoming events.", data={"events": summaries})
-        except Exception as e:
-            return ActionResult(False, f"Failed to list events: {str(e)}", error="calendar_error")
+            return ActionResult(True, f"Loaded {len(summaries)} upcoming events.", data={"events": summaries,
+                "calendar_id": "primary", "calendar_name": events_result.get("summary"), "timezone": events_result.get("timeZone"),
+                "source": "google_calendar", "fetched_at": now})
+        except CancelledError:
+            return ActionResult(False, "Calendar request cancelled; late results discarded.", error="cancelled")
+        except Exception:
+            return ActionResult(False, "Calendar events are unavailable. Check account connection and calendar access.", error="calendar_error")

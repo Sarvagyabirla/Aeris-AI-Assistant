@@ -1,102 +1,137 @@
-# Native/lifecycle continuation
+# Security and privacy boundaries ? 17 October 2026
 
-Owned process cancellation targets the process created by Aeris and descendants enumerated from
-that PID, never application names or unrelated processes. This is not an isolation sandbox or a
-Windows Job Object; reparented, detached or elevated installer effects can remain uncertain.
-Native output is bounded and shown only in explicit tool results, not printed/logged by the runner.
-Installer Defender failure/unavailability now blocks launch. Approved file hash/signer binding is
-still incomplete. Network DNS and socket reads still have blocking boundaries; do not claim instant Stop.
-Task Cancel and global Emergency Stop are distinct; global state is authoritative in PermissionEngine.
-Settings preparation and shutdown are owned background jobs; failed cleanup retains the window.
+Local routing declines negated, quoted, conditional/reported controls, invalid quantities and
+unsupported compounds. These requests produce a local clarification and never a cloud fallback.
+Strict tool schemas reject extra fields, integer coercion and oversized JSON arguments (256 KiB).
 
-# Current increment — 12 October 2026
+Task Stop, microphone mute and latched Emergency Stop are separate controls. Resume is explicit
+and invalidates grants. Settings retain global Stop. Canonical exact SESSION grants expire and
+are pruned; pending dialogs/queued command generations invalidate on task Stop. Account/window/
+sharing-destination identity beyond supplied arguments remains unfinished.
 
-SESSION grants now bind the canonical tool/argument fingerprint and expire after the configured
-approval TTL (default 90 seconds). Different capture regions require new permission. Stop/settings
-invalidate session grants; settings preserve global Stop. This is not full window/account identity
-support: only identities actually supplied in canonical arguments are bound.
-Audit files persist safe status/tool metadata, not arbitrary request/result/exception bodies.
-Coding cloud generation requires separate explicit sharing consent. Sensitive default logging is off.
-Short project publication is linearized against cancellation; cancellation after publication reports
-the remaining artifact instead of promising rollback. Native blocking I/O, installer identity,
-DNS peer restrictions and general filesystem race-resistant handles remain incomplete.
-Untrusted mail/browser text is data; Daily Brief renders retrieved metadata locally and never
-executes retrieved instructions or sends messages. No automatic cloud summarization is added.
+Patch replacement and staged note publication use the token's short commit gate. Cancellation
+winning that gate publishes nothing; later cancellation retains visible artifacts. Notes publish
+with an exclusive same-filesystem hard link, never overwrite an existing destination, and fail
+closed where hard links are unsupported. This does not eliminate external-writer TOCTOU races
+across hostile directory/junction replacement. Transfers/downloads now use exclusive publication;
+Windows moves protect source/destination identities before owned deletion. Hard links are required,
+safe move is Windows-only, and ACL/ADS preservation and general transactional Undo remain unfinished. Document-batch Undo is now implemented with conflict checks.
+Staging/partial cleanup retains active/recent/unowned entries; no blanket partial deletion.
 
-# Aeris security model
+Only explicitly SHAREABLE history is sent to the cloud planner. Existing coding cloud consent
+remains separate. `/private <request>` omits user/reply history even for reply-only requests;
+transient transcript display is separate from persistence. Metadata-only audit defaults remain.
+Configured keys do not grant screenshot/file/mail sharing. Unified content-sharing/account setup
+and full sensitive-input retention controls remain incomplete.
 
-Aeris is intentionally permission-first. The AI planner cannot call the operating system directly. It can only request registered tools, and the registry validates the tool name, required arguments, permission level, kill switch, and dry-run state.
+Keyring failure does not select an environment-key bypass: startup exposes a recovery message
+and retains local simulation text use with AI/listening disabled. Invalid effective boolean,
+numeric/device/wake environment settings fail safely. Saving a settings file after changing a
+credential uses a secret-free intent journal and rolls back on write failure. Failed rollback
+retains the journal and forces current/restarted/CLI use into simulation with AI/listening off;
+no ambiguous stored/environment key is used. Explicit successful Settings save clears recovery.
+Independent concurrent settings writers and full power-loss durability are not guaranteed.
+Existing data is preserved.
 
-## Permission levels
+Whisper loading uses local_files_only=True, including CPU fallback. Normal listening cannot
+start a model download. Cached warmup runs off the Qt event loop after hands-free opt-in. There
+is no first-download consent/progress UI yet, no trained Aeris detector, and no certified acoustic
+echo suppression/barge-in. A synchronous native model load or SDK request cannot be instantly
+interrupted. Cancelled CUDA failure starts no CPU fallback. Stale screen-provider output and
+cancelled task speech are discarded. Passive capture pauses during AERIS speech/global Stop;
+PTT stops speech and waits for quiet. A playback generation discards contaminated transcripts
+even if playback ends during inference. This is an echo guard, not native acoustic certification.
+Failed provider cleanup remains owned; failed speech stop/endLoop retains its owner thread for
+explicit Retry. Failed COM release itself can remain unrecoverable in-process and blocks restart.
 
-| Level | Behaviour | Examples |
-| --- | --- | --- |
-| `AUTO` | Executes without a prompt in live mode | Open configured apps, browser search, volume, brightness, media controls, app search, system health |
-| `SESSION` | Asks once for that capability until Aeris exits | Screen understanding, screenshot, clipboard read, installed-app list, read/open allowed files, read Gmail |
-| `CONFIRM` | Shows the exact action and asks every time | Code-project creation, download, install/update/uninstall, file changes, send email, close app, power actions |
-| `BLOCKED` | Never executes | Password extraction, security bypass, arbitrary shell, automatic download execution |
+Native process cancellation uses the existing bounded run_owned runner. With Windows extras,
+children are created suspended, assigned to an unnamed kill-on-close Job Object and resumed through
+the short cancellation gate. The runner waits for owned descendants and inherited pipes, not just
+the parent exit, and reports weaker fallback ownership explicitly. UAC/service/broker-launched
+processes can still escape. Install interruption remains uncertain; never blindly retry. Installer
+hash/signer/version and browser/download peer enforcement remain unfinished.
 
-Every confirmation token is bound to a SHA-256 fingerprint of the exact tool name and arguments, expires quickly, and can be used only once.
+Close-app approval now binds one observed HWND/PID/creation/title and rechecks it before WM_CLOSE.
+It never blanket-terminates matching processes. The app retains its own unsaved-work prompt; a
+posted close is not proof the window closed. Unicode typing now binds window/process creation/title
+and focused control, previews exact text and deliberately restores only the approved target.
+Identity/focus/Stop are checked per scalar; Windows cannot atomically check focus and inject, so
+one scalar can race a focus change. Input-event delivery does not prove insertion, and semantic
+password/terminal field classification is absent. Other window/clipboard/screenshot scopes remain.
+Permission dialogs use plain text so app titles cannot render HTML.
 
-## File safety
+Reminders are durable local records, excluded from conversation-history copies. No scheduler starts
+in the assistant constructor or without a listener. The UI owns delivery; simulation/global Stop
+pause it. Claims are committed before callbacks, under SQLite BEGIN IMMEDIATE across store instances;
+callbacks run outside the data lock. Queued generic notices contain no private reminder text and
+speech is not used for due notifications. A crash between claim and signal can leave an occurrence
+visible only in the durable Due list. Snooze is explicit; closed-app delivery is unavailable. SQLite
+writes check cancellation before transaction commit, but native commit/fsync waits are not instantly
+interruptible. Broad recurrence DST policy and all locked-screen speech behavior remain unfinished.
 
-- Aeris can only resolve paths inside `AERIS_ALLOWED_PATHS`.
-- Symlink and `..` traversal is checked after canonical path resolution.
-- Executables and scripts cannot be opened through the file tool.
-- Deletion uses the Recycle Bin and always requires confirmation.
-- Text reads are limited to approved extensions and 200 KB.
-- New text files, copies, and moves never overwrite an existing item.
+Cleanup failure retains the window and offers Retry. Reminder/read workers are owned during close.
+Network Test still requires approval for one www.microsoft.com ICMP probe; no HTTP body is fetched.
 
-## Download and installation safety
+Release exclusions cover additional environment variants, credentials, keys, databases/WALs,
+runtime/screenshots/generated-project folders. Only sanitized .env.example is exempted. Local
+wheel artifact-name checks pass; no executable/release bundle exists. MIT metadata now has a
+matching LICENSE (declared author and local Git history). Third-party attribution remains a
+release task; this does not assert a dependency-license audit was completed.
 
-- Downloads accept only complete public HTTP/HTTPS URLs and obey `AERIS_ALLOWED_DOMAINS`.
-- Private, loopback, link-local, embedded-credential, and unsafe redirect targets are blocked.
-- Files are saved only in `AERIS_DOWNLOAD_DIR`, have a configurable size limit, and never overwrite.
-- Downloads are scanned with Microsoft Defender when it is available and are never automatically executed.
-- Normal application installation uses only exact packages from the official `winget` source.
-- A downloaded installer must be inside an allowed path and have a valid Authenticode signature by default.
-- Aeris asks first; Windows/UAC can ask again. Aeris never bypasses UAC or silently elevates itself.
+Official references consulted:
 
-## Microphone and screen safety
+- [Microsoft SetMute absolute-state contract](https://learn.microsoft.com/en-us/windows/win32/api/endpointvolume/nf-endpointvolume-iaudioendpointvolume-setmute)
+- [Microsoft COM lifetime](https://learn.microsoft.com/en-us/windows/win32/api/combaseapi/nf-combaseapi-couninitialize)
+- [Pycaw examples](https://andremiras.github.io/pycaw/examples/index.html)
+- [sounddevice installation/native PortAudio](https://python-sounddevice.readthedocs.io/en/latest/installation.html)
+- [faster-whisper cache-only constructor](https://github.com/SYSTRAN/faster-whisper/blob/master/faster_whisper/transcribe.py)
+- [Windows Job Object ownership and boundaries](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
 
-- Wake listening is visible in the HUD and can be switched off immediately.
-- The emergency stop disables wake listening along with computer tools.
-- Wake standby only executes speech beginning with the configured Aeris wake name.
-- Screen understanding asks for session permission before the first capture.
-- Each screen request captures only currently visible pixels; hidden windows and files are not accessed.
-- The temporary screen image is sent to the configured Gemini model and is not saved by Aeris.
-- Passwords, API keys, payment details, recovery codes, and tokens must not be reproduced by screen analysis.
+Additional official references: [WM_CLOSE](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-close), [PostMessage](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postmessagew), [suspended process flags](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags), [screen brightness API](https://github.com/Crozzers/screen_brightness_control).
 
-## Code-generation safety
+Additional official native references consulted for this increment:
 
-- Generated projects are written only inside `AERIS_CODING_WORKSPACE`, which must also be allowed by `AERIS_ALLOWED_PATHS`.
-- Aeris creates a new unique project folder and never overwrites an existing project.
-- Paths containing traversal, drive letters, hidden files, scripts, executables, or unsupported file types are rejected.
-- Python, JSON, and TOML content is validated before any project is committed.
-- Failed drafts are rolled back; generated programs and dependencies are never automatically executed or installed.
-- Requests for credential theft, spyware, ransomware, persistence malware, reverse shells, or security bypasses are blocked.
+- [SendInput and UIPI restrictions](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput)
+- [KEYBDINPUT Unicode contract](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-keybdinput)
+- [GetGUIThreadInfo](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getguithreadinfo)
+- [SetForegroundWindow restrictions](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setforegroundwindow)
+- [FILE_DISPOSITION_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_disposition_info)
 
-## Secrets
+Portable copy/cleanup use observed identity/hash checks; POSIX check-to-unlink races are not
+fully excluded and safe move is unsupported there. Partial ownership is process-local; the
+24-hour cutoff does not prove another process's hung job inactive. Native DNS/socket/fsync
+blocking limits remain. No adversarial parent-directory/junction immunity is claimed.
 
-- `.env`, Gmail OAuth files, databases, and logs are ignored by Git.
-- Gmail OAuth tokens are stored through the operating-system credential vault using `keyring`.
-- Gmail passwords are never requested or stored.
-- Audit logs redact common secret fields, bearer tokens, and sensitive signed-URL query values.
+## Connected companion increment boundaries
 
-## Safety controls
+Permission categories can be revoked before target preparation. Folder/drive revocations persist
+in access-revocations.json and remain effective through unrelated Settings saves. PathGuard is
+shared by file/coding/install-file adapters and excludes credentials, browser secret stores,
+security data, other users and .git internals. Downloads retain their separately configured
+destination and category; a folder grant does not silently widen download or cloud permissions.
+There is no special elevated access and no sensitive-store exception workflow yet. Cross-process
+revocation and malicious-directory-handle races are not proven closed.
 
-- Aeris starts in dry-run mode unless `--live` is provided.
-- Saying `stop Aeris` activates the kill switch.
-- While stopped, only status and resume commands work.
-- Unknown tools and missing arguments fail closed.
-- Windows and cloud integrations fail safely when a dependency or credential is missing.
+Whole tasks preflight all static arguments/dependencies before any effect. Observed output fields
+are allowlisted, never instructions, and are revalidated under the consumer schema and policy.
+Cooperative deadlines do not interrupt every native/SDK call. Durable task history stores only
+tool/status/safe effect receipts; it excludes user goal text, arguments, mail bodies and pixels.
+Receipt paths remain local. Storage failure retains visible results and blocks subsequent steps;
+PID-based interrupted-work detection needs stronger process identity. No restart replay occurs.
 
-## Intentionally unavailable
+Routines are explicitly saved local typed plans, never keyboard recordings, Python/eval/shell
+macros or inferred authorization. App catalog content, local scope/revocation/category state and
+live/simulation mode are bound to review. Manual runs only; changed scope requires re-review.
+Account/sending/install/destructive operations are outside the routine allowlist. Assist previews
+effects; Trusted mode requires reviewed context. Sensitive ordinary actions retain exact approval.
 
-- Arbitrary PowerShell, Command Prompt, or Python execution
-- UAC bypass or silent administrator elevation
-- Password or credential extraction
-- Financial transactions
-- Unconfirmed or model-generated software installation
-- Silent email sending
-- Automatic execution of downloaded files
+Document organization reads only requested scoped file identities/hashes, confirms an exact bounded
+manifest once and uses the owned exclusive transfer adapter. All sources are checked before the
+first move and again while staging. Undo refuses source/destination changes and newer edits.
+Partial/uncertain work is retained; a crashed in-progress batch is not silently replayed or undone.
+No claim of full multi-file atomicity, ACL/ADS preservation or hostile-parent immunity is made.
+
+The companion has no context-capture function. Click-through requires a recovery path and is
+never persisted. Global shortcuts use RegisterHotKey, not a general keyboard hook. Microphone
+mute is persisted separately from hands-free opt-in; malformed saved presentation data mutes
+passive listening. Single-instance IPC accepts only a restore connection, never task arguments.

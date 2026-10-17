@@ -1,3 +1,5 @@
+> Historical roadmap/design document. Current implemented behavior and blockers are in [IMPLEMENTATION_STATUS](IMPLEMENTATION_STATUS.md), [REQUIREMENTS_TRACEABILITY](REQUIREMENTS_TRACEABILITY.md) and [CONTINUATION](CONTINUATION.md). Checkboxes below are not current acceptance evidence.
+
 # Aeris feature completion plan
 
 Aeris is one continuous project. Features are added to the same application and the same folder. The stages below are engineering checkpoints, not separate products or downloads.

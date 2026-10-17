@@ -7,10 +7,33 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from ..core.process_runner import run_owned
 from ..models import ActionResult
 
 
 class SystemTools:
+    def network_test(self, arguments: dict[str, object], token=None) -> ActionResult:
+        """One explicitly approved public ICMP probe, owned even during DNS waits."""
+        if token and token.is_cancelled:
+            return ActionResult(False, "Network test cancelled before launch.", error="cancelled")
+        if failure := self._require_windows():
+            return failure
+        host = arguments.get("host", "www.microsoft.com")
+        if host != "www.microsoft.com":
+            return ActionResult(False, "This diagnostic supports only the previewed Microsoft endpoint.", error="invalid_arguments")
+        executable = shutil.which("ping.exe")
+        if not executable:
+            return ActionResult(False, "Windows ping is unavailable.", error="missing_dependency")
+        outcome = run_owned([executable, "-n", "1", "-w", "1000", host], timeout=4, token=token, output_limit=2048)
+        data = {"host": host, "protocol": "ICMP", "cleanup_complete": outcome.cleanup_complete, "ownership": outcome.ownership,
+                "reachable": outcome.returncode == 0 and outcome.reason is None}
+        if outcome.reason or not outcome.cleanup_complete:
+            return ActionResult(False, "Network probe interrupted; no connectivity conclusion is available.", data,
+                                outcome.reason or "cleanup_incomplete")
+        if outcome.returncode != 0:
+            return ActionResult(False, "The Microsoft ICMP probe did not reply. This does not prove the internet is offline; firewalls can block ping.", data, "probe_failed")
+        return ActionResult(True, "Microsoft responded to one ICMP probe. This verifies that endpoint only, not every internet service.", data)
+
     @staticmethod
     def _require_windows() -> ActionResult | None:
         if os.name != "nt":

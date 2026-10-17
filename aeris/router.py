@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from .activation import TEXT_WAKE_ALIASES, extract_addressed_command, strip_address
 from .models import ActionRequest, PlannedResponse
 
 
@@ -10,18 +11,6 @@ def _clean_value(value: str) -> str:
     return value.strip().strip("\"'")
 
 
-_WAKE_NAMES = (
-    "aeris",
-    "airis",
-    "aris",
-    "arish",
-    "eris",
-    "haris",
-    "iris",
-    "एरिस",
-    "ऐरिस",
-    "हैरिस",
-)
 _ONES = {
     "zero": 0,
     "one": 1,
@@ -61,38 +50,15 @@ _HINDI_NUMBERS = {
 
 
 def has_wake_word(value: str, preferred: str = "aeris") -> bool:
-    names = tuple(dict.fromkeys((preferred.strip().lower(), *_WAKE_NAMES)))
-    wake_names = "|".join(re.escape(name) for name in names if name)
-    return bool(
-        re.match(
-            rf"^(?:(?:ok|okay|hey|hello)[\s,.:;-]+)?(?:{wake_names})\b",
-            value.strip(),
-            flags=re.I,
-        )
-    )
+    return extract_addressed_command(value, (preferred, *TEXT_WAKE_ALIASES)) is not None
 
 
 def strip_wake_word(value: str, preferred: str = "aeris") -> str:
-    names = tuple(dict.fromkeys((preferred.strip().lower(), *_WAKE_NAMES)))
-    wake_names = "|".join(re.escape(name) for name in names if name)
-    return re.sub(
-        rf"^(?:(?:ok|okay|hey|hello)[\s,.:;-]+)?(?:{wake_names})\b[\s,.:;-]*",
-        "",
-        value.strip(),
-        count=1,
-        flags=re.I,
-    ).strip()
+    return strip_address(value, (preferred, *TEXT_WAKE_ALIASES))
 
 
-def _strip_voice_wrappers(value: str) -> str:
-    command = value.strip()
-    wake_names = "|".join(re.escape(name) for name in _WAKE_NAMES)
-    command = re.sub(
-        rf"^(?:(?:ok|okay|hey|hello)[\s,.:;-]+)?(?:{wake_names})\b[\s,.:;-]*",
-        "",
-        command,
-        flags=re.I,
-    )
+def _strip_voice_wrappers(value: str, preferred: str = "aeris") -> str:
+    command = strip_wake_word(value, preferred)
     command = re.sub(r"^(?:please\s+|can you\s+|could you\s+|would you\s+)+", "", command, flags=re.I)
     return command.strip()
 
@@ -106,36 +72,29 @@ def _normalize_command(value: str) -> str:
 
 
 def _extract_level(value: str) -> int | None:
-    digit = re.search(r"(?<!\d)(100|\d{1,2})(?!\d)", value)
-    if digit:
-        return int(digit.group(1))
-
-    tokens = re.findall(r"[a-z]+", value.lower().replace("-", " "))
-    for index, token in enumerate(tokens):
-        if token in _HINDI_NUMBERS:
-            return _HINDI_NUMBERS[token]
-        if token not in _ONES and token not in _TENS and token != "hundred":
-            continue
-        total = 0
-        consumed = False
-        for number_token in tokens[index:]:
-            if number_token in _ONES:
-                total += _ONES[number_token]
-                consumed = True
-            elif number_token in _TENS:
-                total += _TENS[number_token]
-                consumed = True
-            elif number_token == "hundred" and consumed:
-                total = max(total, 1) * 100
-            else:
-                break
-        if consumed and 0 <= total <= 100:
-            return total
+    """Parse a whole unsigned integral percentage; never salvage a numeric substring."""
+    value = value.strip()
+    if re.fullmatch(r"(?:100|[0-9]{1,2})", value):
+        return int(value)
+    if value in _HINDI_NUMBERS:
+        return _HINDI_NUMBERS[value]
+    if value in _ONES:
+        return _ONES[value]
+    if value in _TENS:
+        return _TENS[value]
+    if value in {"one hundred", "hundred"}:
+        return 100
+    tokens = value.split()
+    if len(tokens) == 2 and tokens[0] in _TENS and tokens[1] in _ONES and 1 <= _ONES[tokens[1]] <= 9:
+        return _TENS[tokens[0]] + _ONES[tokens[1]]
     return None
 
 
 class LocalRouter:
     """Fast, offline routing for common and predictable commands."""
+
+    def __init__(self, wake_word: str = "aeris"):
+        self.wake_word = wake_word
 
     HELP = (
         "Offline commands include: open Chrome or YouTube; search Google or YouTube; set volume or "
@@ -149,10 +108,40 @@ class LocalRouter:
 
     def route(self, text: str) -> PlannedResponse | None:
         source_text = text.strip()
-        original = _strip_voice_wrappers(source_text)
+        original = _strip_voice_wrappers(source_text, self.wake_word)
         normalized = _normalize_command(original)
         if not normalized:
             return PlannedResponse(reply="I did not hear a command.")
+
+        # These are statements/questions, not permission to perform a mentioned action.
+        # Return a local answer so a planner cannot reinterpret the denied command.
+        if original[:1] in {'"', "'", "“", "‘", "`"} or re.search(
+            r"\b(?:don['’]t|do not|never|if|unless|imagine|suppose|hypothetically|"
+            r"said|says|told|asked|mat|nahi)\b", normalized
+        ) and not re.match(r"^(?:type|send email|create note|make note|search|google|write|generate|remind me|set a reminder)\b", normalized):
+            return PlannedResponse(reply="No action taken. Give one direct command when you want me to act.")
+        data_command = re.match(r'^(?:type|send email|create note|make note|search|google|write|generate|remind me|set a reminder|look at|check|analyze|analyse|read)\b', normalized)
+        clauses = re.split(r'\s*(?:,\s*(?:and\s+)?|\s+(?:and|then|aur)\s+)\s*', original, flags=re.I)
+        if len(clauses) > 1 and not data_command and normalized != 'check system health and status':
+            safe_tools = {'desktop.open_app', 'desktop.set_volume', 'desktop.change_volume',
+                          'desktop.set_brightness', 'desktop.change_brightness', 'desktop.media_control',
+                          'desktop.window_action', 'system.health', 'system.battery', 'system.status'}
+            actions = []
+            for clause in clauses[:13]:
+                clause = re.sub(r'^(?:and|then)\s+', '', clause, flags=re.I)
+                routed = self.route(clause) if clause.strip() else None
+                if not routed or len(routed.actions) != 1 or routed.actions[0].tool not in safe_tools:
+                    return PlannedResponse(reply='No action taken. One part of this task is unsupported or ambiguous. Use direct app, volume, brightness, media or window commands.')
+                actions.extend(routed.actions)
+            if len(clauses) > 12:
+                return PlannedResponse(reply='No action taken. A task can contain at most twelve steps.')
+            return PlannedResponse(actions=actions)
+        if re.search(
+            r"(?:\b(?:and|then|also|aur)\b|[;\n])\s*(?:then\s+)?"
+            r"(?:set|change|open|close|launch|install|uninstall|delete|move|copy|volume|brightness|mute|shutdown|restart)\b",
+            normalized,
+        ) and not re.match(r"^(?:type|send email|create note|make note|search|google|write|generate|remind me|set a reminder)\b", normalized):
+            return PlannedResponse(reply="No action taken. Please give these commands one at a time; compound actions are not supported yet.")
 
         if normalized in {
             "help",
@@ -162,12 +151,23 @@ class LocalRouter:
             "what can you do",
         }:
             return PlannedResponse(reply=self.HELP)
+        organize = re.fullmatch(r'organize documents in (.+)', original, re.I)
+        if organize:
+            return self._action(original, 'files.organize', path=_clean_value(organize[1]))
+        undo_batch = re.fullmatch(r'undo organization ([0-9a-f]{32})', normalized)
+        if undo_batch:
+            return self._action(original, 'files.undo_organization', batch_id=undo_batch[1])
         if normalized in {"status", "aeris status", "system status"}:
             return self._action(original, "system.status")
         if normalized in {"stop", "stop aeris", "emergency stop", "kill switch"}:
             return self._action(original, "system.stop")
         if normalized in {"resume", "resume aeris", "start aeris"}:
             return self._action(original, "system.resume")
+        if normalized == "check system health and status":
+            return PlannedResponse(actions=[ActionRequest("system.health", source_text=source_text),
+                                            ActionRequest("system.status", source_text=source_text)])
+        if normalized in {"test network connectivity", "network test"}:
+            return self._action(original, "system.network_test", host="www.microsoft.com")
         if normalized in {"computer health", "system health", "pc health", "computer info", "system info", "mera computer health check karo"}:
             return self._action(original, "system.health")
         if normalized in {"battery", "battery status", "check battery", "how much battery"}:
@@ -182,6 +182,29 @@ class LocalRouter:
             return self._action(original, "system.restart")
         if normalized in {"cancel shutdown", "cancel restart", "abort shutdown"}:
             return self._action(original, "system.cancel_shutdown")
+
+        if normalized in {"list reminders", "show reminders", "my reminders"}:
+            return self._action(original, "reminder.list")
+        identifier = r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+        cancel_reminder = re.fullmatch(r"cancel reminder " + identifier, normalized)
+        if cancel_reminder:
+            return self._action(original, "reminder.cancel", reminder_id=cancel_reminder[1])
+        snooze = re.fullmatch(r"snooze reminder " + identifier + r"(?: for)? ([0-9]+) minutes?", normalized)
+        if snooze:
+            return self._action(original, "reminder.snooze", reminder_id=snooze[1], minutes=int(snooze[2]))
+        day = r"(?:today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+        when = rf"(?:in [0-9]+ (?:second|minute|hour|day)s?|{day}(?: at [0-9]{{1,2}}(?::[0-9]{{2}})?\s*(?:am|pm)?)?|[0-9]{{4}}-\S+)"
+        reminder = re.fullmatch(rf"(?:remind me|set a reminder)(?: (daily|weekly))? ({when}) to (.+)", original, re.I)
+        if reminder:
+            args = {"when": reminder[2], "message": reminder[3]}
+            if reminder[1]:
+                args["recurrence"] = reminder[1].lower()
+            return self._action(original, "reminder.set", **args)
+        reminder = re.fullmatch(rf"remind me to (.+) ({when})", original, re.I)
+        if reminder:
+            return self._action(original, "reminder.set", message=reminder[1], when=reminder[2])
+        if re.match(r"^(?:remind me|set a reminder|cancel reminder|snooze reminder)\b", normalized):
+            return PlannedResponse(reply="Use 'remind me in 15 minutes to stretch', 'remind me tomorrow at 9am to study', or select a reminder in the Reminders tab.")
 
         screen_question = re.match(
             r"^(?:look at|check|analyze|analyse|read) (?:my|the) screen(?: and|,)?\s*(.*)$",
@@ -293,29 +316,37 @@ class LocalRouter:
         if normalized in {"decrease volume", "volume down", "turn volume down", "volume kam karo"}:
             return self._action(original, "desktop.change_volume", delta=-10)
         if normalized in {"mute", "mute volume", "unmute", "unmute volume"}:
-            return self._action(original, "desktop.media_control", action="mute")
-        if "volume" in normalized or "awaz" in normalized:
-            level = _extract_level(normalized)
-            if level is not None and re.search(r"\b(?:set|change|make|put|volume|awaz|kar do)\b", normalized):
-                return self._action(source_text, "desktop.set_volume", level=level)
-
+            return self._action(original, "desktop.media_control", action="unmute" if normalized.startswith("unmute") else "mute")
         if normalized in {"increase brightness", "brightness up", "turn brightness up"}:
             return self._action(original, "desktop.change_brightness", delta=10)
         if normalized in {"decrease brightness", "brightness down", "turn brightness down", "screen ki brightness kam karo"}:
             return self._action(original, "desktop.change_brightness", delta=-10)
-        if "brightness" in normalized:
-            level = _extract_level(normalized)
-            if level is not None and re.search(r"\b(?:set|change|make|put|brightness|kar do)\b", normalized):
-                return self._action(source_text, "desktop.set_brightness", level=level)
+        control = re.fullmatch(
+            r"(?:(?:set|change|make|put) (?:the )?)?(volume|awaz|brightness) "
+            r"(?:(?:to|at|for) )?(.+?)(?: percent)?(?: kar do| bus)?", normalized,
+        )
+        if control:
+            level = _extract_level(control.group(2))
+            if level is not None:
+                tool = "desktop.set_brightness" if control.group(1) == "brightness" else "desktop.set_volume"
+                return self._action(source_text, tool, level=level)
+            return PlannedResponse(reply="No action taken. Use a whole percentage from 0 to 100, for example 'set volume to 35'.")
+        if re.search(r"\b(?:volume|awaz|brightness)\b", normalized) and not re.match(
+            r"^(?:type|send email|create note|make note|search|google|write|generate)\b", normalized
+        ):
+            return PlannedResponse(reply="No action taken. Use one direct volume or brightness command with a whole percentage from 0 to 100.")
 
         media = {
-            "play": "play_pause",
-            "pause": "play_pause",
-            "play music": "play_pause",
-            "pause music": "play_pause",
-            "pause the song": "play_pause",
+            "play": "play",
+            "pause": "pause",
+            "play music": "play",
+            "pause music": "pause",
+            "pause the song": "pause",
             "stop the music": "stop",
-            "play the song": "play_pause",
+            "play the song": "play",
+            "toggle playback": "play_pause",
+            "toggle music": "play_pause",
+            "toggle mute": "toggle_mute",
             "next song": "next",
             "next track": "next",
             "previous song": "previous",
@@ -344,6 +375,8 @@ class LocalRouter:
             "maximize current window": "maximize_current",
             "minimize window": "minimize_current",
             "minimize current window": "minimize_current",
+            'minimize this window': 'minimize_current',
+            'maximize this window': 'maximize_current',
         }
         if normalized in window_actions:
             return self._action(original, "desktop.window_action", action=window_actions[normalized])

@@ -1,5 +1,8 @@
 """Shared bounded parsing and tool selection for both model adapters."""
+import json
+
 from ..models import ActionRequest, PlannedResponse
+from ..tasks import TaskPlan
 
 KEYWORDS = {
     "desktop": ("open", "close", "volume", "brightness", "play", "pause", "type", "screenshot", "clipboard", "window"),
@@ -22,8 +25,19 @@ def select_tools(text, definitions):
 
 
 def parse_plan(payload, allowed_names, source_text):
-    if not isinstance(payload, dict) or set(payload) - {"reply", "actions"}:
+    if len(json.dumps(payload, allow_nan=False).encode("utf-8")) > 262_144:
+        raise ValueError("Planner payload exceeds 256 KiB")
+    if not isinstance(payload, dict) or set(payload) - {"reply", "actions", "steps"}:
         raise ValueError("Planner must return a reply/actions object")
+    if 'steps' in payload:
+        if 'actions' in payload or not isinstance(payload.get('reply', ''), str):
+            raise ValueError('Use either steps or actions, with a text reply')
+        if payload['steps'] == []:
+            return PlannedResponse(reply=payload.get('reply', '').strip())
+        plan = TaskPlan.model_validate({'steps': payload['steps']})
+        if any(step.tool not in allowed_names for step in plan.steps):
+            raise ValueError('Unknown task tool')
+        return PlannedResponse(reply=payload.get('reply', '').strip(), steps=plan.steps)
     actions = payload.get("actions", [])
     if not isinstance(actions, list) or len(actions) > 5:
         raise ValueError("Planner must return at most five actions")

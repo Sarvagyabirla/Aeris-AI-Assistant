@@ -1,126 +1,96 @@
-# Aeris — Windows personal assistant (active development)
+# Aeris - Windows desktop companion
 
-### Current continuation increment
+One Python/PySide6 application in the existing Aeris checkout. This increment connects an
+original animated vector humanoid, floating companion, typed multi-step execution, permission
+controls, reviewed local routines and document organization with guarded Undo. **The full
+master prompt remains unfinished.** No native-device, account or frozen-release certification
+is implied by fixture results.
 
-Owned winget, Defender and signature-check processes now support token cancellation, bounded
-output and deadlines. Detached/elevated installers are **not** guaranteed to stop; interrupted
-installation state is uncertain and must be inspected before retrying. Package install success
-requires a separate exact package-list observation; version/publisher checks remain incomplete.
-Installer files fail closed unless Defender scanning completes. Downloads preserve/report artifacts
-if cancellation arrives after publication; socket/DNS waits remain bounded but not instantly cancellable.
+[Current status](docs/IMPLEMENTATION_STATUS.md) | [Actual validation](docs/VALIDATION_REPORT.md) |
+[All requirements](docs/REQUIREMENTS_TRACEABILITY.md) | [Continuation](docs/CONTINUATION.md)
 
-Settings adapters are prepared before effective publication and applied on a GUI-owned background
-worker. Close cleanup also runs off the Qt event loop, once; a failed cleanup retains the window
-instead of destroying live workers. Rapid voice restart callbacks are generation-guarded.
+## Launch and check
 
-`make it 40` works for a recent successful absolute volume/brightness command for 30 seconds,
-with unchanged simulation mode. Expired/intervening context asks which control; no generic `yes`
-authorizes actions. Stop cancels a task; **Emergency Stop** blocks future tasks until `resume Aeris`.
-Microphone mute remains separate. These workflows are fixture verified, not real-device certified.
-
-One Python/PySide6 project. Daily launcher: **START_AERIS.bat**.
-
-## Verified status — 12 October 2026
-
-Current reviewed baseline: `6b22de3d6624ea2ad5aa58de0cc0edc00ff1907d`.
-New increment adds cancellation checkpoints/atomic project publication, expiring exact-scope grants,
-preserved global Stop across settings, typed saved-settings recovery, metadata-only audit defaults,
-and native PortAudio failure recovery. CI now installs Ubuntu PortAudio with a separate lint job;
-remote CI has not been rerun in this local session.
-
-Daily Brief now retrieves up to five authorized upcoming events and five recent email metadata
-records through the normal registry, without an LLM or sending. Simulation does not fetch.
-It displays source timestamps verbatim (including offsets), not a timezone-converted all-day agenda.
-The Local memory tab explicitly inspects, corrects and forgets recent conversation records.
-It is not yet a durable project-fact/reminder manager. GUI speech uses tool outcomes, not planner promises.
-
-The current increment repairs foundation defects and connects existing desktop voice/result paths.
-It is **not yet the completed personal Jarvis application**. Do not treat registered tools as device verification.
-See `docs/IMPLEMENTATION_STATUS.md`, `docs/VALIDATION_REPORT.md`, `docs/CAPABILITY_MATRIX.md`
-and `docs/PERFORMANCE.md` for implemented versus incomplete work.
-
-Verified with temporary data/fake adapters: duplicate-history migration, sensitive omission,
-cloud serialization privacy, effective executor settings, secure credential adapter/removal,
-strict arguments/canonical approval, failed-step blocking, browser startup error propagation,
-bounded coding search/hash-checked single-file patches, Qt command/cancellation/close flow and TTS thread ownership.
-Real microphone, installed voice, app/device effects, OAuth accounts and packaged executable still require acceptance.
-
-The interface is the existing native Qt dashboard with Settings, shortcuts, text input, Stop,
-effective simulation/live label, transcript, push-to-talk and mute controls. No holographic character,
-companion overlay, tray service, trained wake model or verified voice barge-in is advertised.
-
-## Install and daily use
-
-Use Python 3.11 on Windows. Double-click SETUP_AERIS.bat for the full optional Windows setup;
-its PowerShell script installs requirements-lock.txt then the project with --no-deps, checks native
-exit codes, installs Chromium and runs developer tests. Preserve your existing .env and runtime data.
-
-Double-click START_AERIS.bat for daily use. Start in **SIMULATION**: results say “would execute”
-and must not be interpreted as actual PC changes. Enable live mode deliberately in Settings only
-after harmless acceptance checks. Saved mode is restored unless an explicit CLI flag overrides it.
-
-Hands-free defaults off in new configs/.env.example. Enable intentionally after microphone/model setup.
-Existing saved preferences are retained. Push-to-talk is available. The current activation implementation
-transcribes audio and checks an addressed phrase at word boundaries; it is not a dedicated wake detector.
-Whisper may download its model on first actual voice use. Offline ASR requires cached assets.
-
-## Settings/privacy
-
-- Precedence: explicit CLI mode > saved settings > environment > defaults.
-- Settings apply between assistant tasks. If busy, finish/Stop first. Voice restarts after capture cleanup.
-- New API keys are saved using the optional OS keyring backend, never settings JSON. Legacy JSON keys
-  migrate after a successful credential-store write. Clearing removes the stored key and blocks environment fallback.
-  Credential backend errors are surfaced; legacy secrets are not deleted if migration fails.
-- .env remains a user-managed plaintext configuration source; do not commit it. Prefer masked Settings for new keys.
-- Settings are atomically replaced. Malformed JSON disables file access/listening and enables simulation with a warning.
-- Repeated conversation text is retained as separate messages. New SENSITIVE/DO_NOT_STORE content is not persisted.
-  LOCAL_ONLY history is never included in cloud planner context. Only bounded explicit SHAREABLE records are included.
-- Flexible cloud requests require an exact current-request sharing decision before the provider call.
-  Files/screens have separate permissions; a configured API key is not universal upload consent.
-- Local memory supports inspect/correct/forget; export/retention UI and reminders remain pending.
-- Screen capture without explicit region fails closed. Screen monitoring is unavailable until safe preview/scope UI exists.
-- Browser click/fill require confirmation and observed URL. DNS-resolved private-network defense and same-URL
-  DOM target identity remain unfinished; do not use this as a secure unattended consequential automation service.
-
-## PowerShell checks
+From your existing `AERIS_AI_ASSISTANT` parent folder:
 
 ```powershell
-Set-Location 'C:\AI Related project BY AI\AERIS_AI_ASSISTANT\Aeris'
-& '.\.venv\Scripts\python.exe' -m aeris --help
-& '.\.venv\Scripts\python.exe' -m aeris --self-test
-& '.\.venv\Scripts\python.exe' -m aeris --no-ai --simulate --once 'open notepad'
-& '.\.venv\Scripts\python.exe' -m pytest -ra
-& '.\.venv\Scripts\python.exe' -m ruff check .
+.\START_AERIS.bat
+.\AERIS.bat --self-test
+.\AERIS.bat --test
+.\AERIS.bat --lint
 ```
 
-`--self-test` checks offline package/catalog/local-route presence without models, accounts, devices,
-network or pytest. It is not hardware acceptance. `--live` and `--simulate` are mutually exclusive
-intentional overrides. No --benchmark flag is advertised; the isolated measurement script is
-`scripts/measure_local.py`. Developer tests mock model loading and do not download ASR assets.
+The parent launchers forward to the nested Aeris repository and its existing Python 3.11
+.venv. Inside Aeris, START_AERIS.bat / RUN_AERIS.bat use the same application. Normal launch
+starts the controller automatically and restores dashboard/companion, motion and microphone
+mute preferences. Saved live/simulation and hands-free opt-in remain effective. Invalid
+credential/settings recovery forces simulation and disables AI/listening. No setup or model
+download occurs during normal startup. No environments, personal files or settings were
+replaced during implementation.
 
-Base text use needs only base dependencies (`python -m pip install -e .`); optional services report setup errors.
-Qt tests require the UI extra, and audio-adapter tests require sounddevice. Those dependencies are explicitly
-skipped when absent rather than blanket voice-test exclusion. Portable controller tests remain runnable.
+## Connected use
 
-## Build/release
+- Dashboard: character, conversation, actual task steps, measured process memory, input,
+  microphone/speech controls, task Stop and latched Emergency Stop with explicit Resume.
+- Floating companion: move/resize, optional on-top, PTT, mute microphone, Stop, dashboard and
+  hide controls. Click-through requires a working tray or native restore shortcut and is
+  never restored automatically. Reduced motion and hidden/minimized animation pausing apply
+  to both views. Speech motion follows the speaking state; it is not phoneme lip sync.
+- Windows shortcuts: Ctrl+Alt+A restore and recover clicks, Ctrl+Alt+S task/speech Stop,
+  Ctrl+Alt+Space push to talk. Native registration can fail if another app owns a shortcut;
+  tray/application controls remain available. Physical Windows acceptance is still needed.
+- Permissions: choose any accessible folder or drive root, inspect/revoke it, and enable or
+  revoke capability categories. Broad scopes exclude credential/security stores and .git
+  internals; they never authorize automatic indexing or cloud upload. Local access, account
+  permissions, external effects and cloud sharing remain distinct.
+- Settings: Assist previews effects; Task Automation runs requested supported low-risk steps;
+  Trusted Routines requires an explicitly reviewed local workflow. Simulation stays a separate
+  setting. Sends, installs, destructive work and sharing retain their ordinary approvals.
+- Tasks & routines: review/save one to twelve typed local steps, run from one text or voice
+  command, inspect history, disable routines and review organization Undo. Use the Study
+  template, review it, then say `run routine study mode`. No automatic trigger is enabled.
 
-BUILD_AERIS.bat now runs `python -m aeris --self-test`, developer tests, and packages run_aeris.py
-instead of executing a relative-import package file. Catalog defaults resolve relative to source/frozen resources,
-not caller cwd; writable data lives in LOCALAPPDATA\Aeris (or AERIS_DATA_DIR), not the install folder.
-The build still needs a reviewed pinned PyInstaller installation and clean Windows executable acceptance.
-No verified executable is supplied by this increment. Source packaging command success alone is not release readiness.
+Examples: `open notepad, set volume to 35, and minimize this window`, `set volume to 50 and
+brightness to 20`, `remind me in 15 minutes to stretch`, `daily brief`, `system health`.
+Use **Select task / typing window** for the exact external window before target-specific work.
+App launch alone does not establish control of that app. Each step retains its observed result;
+failed dependencies block later work. Invalid quantities, negated/quoted/conditional commands
+and unsupported compounds produce no partial execution or cloud reinterpretation.
 
-## Troubleshooting
+To organize selected documents: grant the folder in Permissions, choose it in Tasks & routines
+or type `organize documents in C:\path\to\fixtures`. Review all source/destination pairs once.
+Batches are limited to 100 documents / 50 MiB / 1,000 directory entries, without recursion.
+Windows owned-file moves require a hard-link-capable filesystem. Undo checks hashes/identities
+and refuses intervening edits; empty category folders remain. Partial/uncertain effects are
+retained for review. Ordinary copy/move is still not a general transactional rollback system.
 
-- Busy settings/commands: finish the current task or press Stop, then retry; voice rejection is shown.
-- Voice unavailable/model not loaded: use text, check device permissions and optional packages; toggle listening/restart capture.
-- Credentials unavailable: configure a supported keyring backend; Aeris will not fall back to plaintext settings.
-- Malformed settings: preserve/repair settings.json; file access is disabled until trusted paths are configured.
-- Browser unavailable: install the browser extra and its Chromium runtime; waits now fail usefully rather than hang indefinitely.
-- Screen scope required: selected-region/crop workflow is unfinished; do not bypass the guard.
-- Patch rejected: use a fresh exact-byte SHA256 and a nonempty unique match; no hidden overwrite/commit/push occurs.
-- Reminders require implementation, not merely leaving the app open. Daily Brief retrieves bounded event/mail metadata;
-  local reminders, account display, conversational drafts and rich summaries remain incomplete.
+## Preserved controls and limits
 
-Gmail OAuth setup remains documented in `docs/GMAIL_SETUP.md`. Use designated test accounts for acceptance;
-never send to real contacts as an automated test. Pending workflows are listed in the status/matrix documents.
+Local volume/mute/brightness, configured app launch, files, health, reminders and selected
+window controls do not need cloud reasoning. Absolute play/pause remains unsupported until a
+selected media-session adapter exists; explicit playback toggle remains separate. Selected
+Unicode typing previews/refocuses the exact window/control, stops on focus changes and reports
+input events; it does not read back insertion. Graceful close preserves app save prompts and
+never force-kills a process. Close requests are explicitly unverified dispatches.
+
+Microphone mute is saved separately from hands-free opt-in. PTT permits one utterance while
+passive listening stays muted. Passive capture pauses during Aeris speech; PTT stops speech
+before capture. Cached speech assets load off the UI thread. Acoustic barge-in, trained wake
+assets, device selection and first-download onboarding are unfinished. Native model/SDK calls
+can outlive Stop acknowledgment. Reminders need Aeris running in LIVE mode; tray can keep it
+open, but no closed-app service or startup registration is promised.
+
+Only SHAREABLE history reaches the cloud planner. `/private <request>` omits conversation
+persistence. Task history stores safe tool/status/effect receipts, not request bodies, screenshots
+or mail content. Account setup, sensitive input controls and destination-bound sharing need
+more work. See [security](docs/SECURITY.md).
+
+Still unfinished: selected-screen preview/redaction/watch, UI Automation and guarded visual
+fallback, same-page browser identity/peer enforcement, immutable installer approvals,
+account-specific Gmail drafts/OAuth, multi-file coding review/checks/Undo, broader project and
+specialist adapters, onboarding, unified locks and a verified frozen executable. PyInstaller is
+absent in this environment. The source wheel check does not certify a desktop release.
+
+See [supervised Windows checks](docs/WINDOWS_TESTING.md), [capability evidence](docs/CAPABILITY_MATRIX.md)
+and [performance](docs/PERFORMANCE.md). Earlier reports are retained in docs/history.
+No commits or pushes were made.

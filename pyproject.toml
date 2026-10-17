@@ -52,6 +52,9 @@ aeris = "aeris.cli:main"
 [tool.setuptools.packages.find]
 include = ["aeris*"]
 
+[tool.setuptools.cmdclass]
+build_py = "scripts.build_resources.BuildWithResources"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
